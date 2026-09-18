@@ -20,6 +20,8 @@ export const LiveCameraCard: React.FC<LiveCameraCardProps> = ({
 }) => {
   const isRunning = monitoringState === "RUNNING";
   const isCameraReady = cameraState === "READY";
+  const isBusyOrUnavailable = cameraState === "CAMERA_BUSY_OR_UNAVAILABLE" || cameraState === "CAMERA_ERROR";
+  const isNoFrames = cameraState === "NO_FRAMES";
   const [overlayMode, setOverlayMode] = useState<OverlayModeType>("MINIMAL");
 
   return (
@@ -67,6 +69,30 @@ export const LiveCameraCard: React.FC<LiveCameraCardProps> = ({
                   </span>
                 </div>
               </div>
+            </div>
+          ) : isBusyOrUnavailable ? (
+            <div className="camera-placeholder error">
+              <div className="placeholder-icon warning" aria-hidden="true">
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="1.8">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+              </div>
+              <p className="placeholder-title">Camera Busy or Unavailable</p>
+              <p className="placeholder-sub">The local companion cannot access the webcam. Ensure no other application (Zoom, Teams, etc.) is holding the camera and that the device is connected.</p>
+            </div>
+          ) : isNoFrames ? (
+            <div className="camera-placeholder warning">
+              <div className="placeholder-icon warning" aria-hidden="true">
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="1.8">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+              </div>
+              <p className="placeholder-title">No Video Frames Received</p>
+              <p className="placeholder-sub">The camera device was opened by the local companion, but video frames timed out.</p>
             </div>
           ) : (
             <div className="camera-placeholder connecting">

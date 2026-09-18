@@ -64,6 +64,21 @@ async def update_preferences(
         updated = await session_service.repository.upsert_user_preferences(
             user_id=user.id, token=user.token, payload=data
         )
+        # Trigger data retention enforcement when preference is updated
+        retention_days = updated.get('data_retention_days') or data.get('data_retention_days')
+        if retention_days and isinstance(retention_days, int) and retention_days > 0:
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    session_service.repository.cleanup_expired_sessions(
+                        user_id=user.id,
+                        token=user.token,
+                        retention_days=retention_days,
+                    )
+                )
+            except Exception:
+                pass
         return updated
     except HTTPException:
         raise
@@ -110,4 +125,38 @@ async def delete_user_data(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Failed to delete user data: {str(e)}"
+        )
+
+@router.post("/startup", response_model=Dict[str, Any])
+async def startup_cleanup(
+    user: AuthenticatedUser = Depends(get_current_user)
+):
+    """
+    Authenticated app startup trigger.
+    1. Marks any stale ACTIVE sessions as INTERRUPTED.
+    2. Enforces data retention policy if configured.
+    Called once per authenticated session start.
+    """
+    try:
+        stale_count = await session_service.repository.mark_stale_sessions_interrupted(
+            user_id=user.id, token=user.token
+        )
+        deleted_count = 0
+        prefs = await session_service.repository.get_user_preferences(
+            user_id=user.id, token=user.token
+        )
+        retention_days = prefs.get("data_retention_days")
+        if retention_days and isinstance(retention_days, int) and retention_days > 0:
+            deleted_count = await session_service.repository.cleanup_expired_sessions(
+                user_id=user.id, token=user.token, retention_days=retention_days
+            )
+        return {
+            "status": "ok",
+            "stale_sessions_interrupted": stale_count,
+            "sessions_deleted_by_retention": deleted_count,
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Startup cleanup failed: {str(e)}"
         )

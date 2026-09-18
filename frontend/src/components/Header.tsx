@@ -12,6 +12,7 @@ interface HeaderProps {
   onToggleSidebar: () => void;
   apiBase: string;
   onOpenAuth: () => void;
+  onOpenStatus?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -22,6 +23,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleSidebar,
   apiBase,
   onOpenAuth,
+  onOpenStatus,
 }) => {
   const { user, signOut } = useAuth();
   const {
@@ -110,7 +112,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Cloud Sync Status Pill */}
         <CloudSyncPill apiBase={apiBase} />
 
-        <div className="system-pill" aria-live="polite">
+        <div className="system-pill clickable" aria-live="polite" onClick={onOpenStatus} title="Click to view System Status Center" style={{ cursor: "pointer" }}>
           <span className={status.dot} />
           <span className="system-pill-text">{status.text}</span>
         </div>

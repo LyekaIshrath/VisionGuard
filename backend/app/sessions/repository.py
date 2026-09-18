@@ -283,6 +283,47 @@ class SupabaseSessionRepository:
             if resp.status_code == 200:
                 return resp.json()
             resp.raise_for_status()
+    async def cleanup_expired_sessions(self, user_id: str, token: str, retention_days: int) -> int:
+        """
+        Deletes completed historical sessions older than retention_days.
+
+        Safety constraints:
+        - Only targets status = 'COMPLETED'
+        - Never deletes ACTIVE, INTERRUPTED, or in-progress sessions
+        - Enforced under user's own RLS bearer token
+        - Returns count of deleted sessions
+        """
+        if not self.base_url or retention_days <= 0:
+            return 0
+
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+
+        url = (
+            f"{self.base_url}/monitoring_sessions"
+            f"?user_id=eq.{user_id}"
+            f"&status=eq.COMPLETED"
+            f"&started_at=lt.{cutoff}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # First: count how many will be deleted
+                count_resp = await client.get(
+                    url + "&select=id",
+                    headers=self._get_headers(token, prefer_return=False),
+                )
+                if count_resp.status_code != 200:
+                    return 0
+                rows = count_resp.json()
+                if not rows:
+                    return 0
+                count = len(rows)
+                # Delete
+                await client.delete(url, headers=self._get_headers(token, prefer_return=False))
+                return count
+        except Exception:
+            return 0
+
 
     async def list_events_in_range(
         self,

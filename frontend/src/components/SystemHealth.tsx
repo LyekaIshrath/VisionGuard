@@ -8,6 +8,7 @@ interface SystemHealthProps {
   wsConnected: boolean;
   framesReceived: number;
   humanState: HumanStateData;
+  onOpenStatus?: () => void;
 }
 
 export const SystemHealth: React.FC<SystemHealthProps> = ({
@@ -17,16 +18,34 @@ export const SystemHealth: React.FC<SystemHealthProps> = ({
   wsConnected,
   framesReceived,
   humanState,
+  onOpenStatus,
 }) => {
   const isCameraHealthy = cameraState === "READY";
   const isRunning = monitoringState === "RUNNING";
+  const isBusyOrUnavailable = cameraState === "CAMERA_BUSY_OR_UNAVAILABLE" || cameraState === "CAMERA_ERROR";
+  const isNoFrames = cameraState === "NO_FRAMES";
+
+  const getCameraStatusLabel = () => {
+    if (isCameraHealthy) return "Ready";
+    if (isNoFrames) return "No Frames";
+    if (cameraState === "CAMERA_BUSY_OR_UNAVAILABLE") return "Busy/Unavailable";
+    if (cameraState === "CAMERA_ERROR") return "Error";
+    return "Standby";
+  };
+
+  const getCameraStatusDotClass = () => {
+    if (isCameraHealthy && isRunning) return "good";
+    if (isNoFrames) return "warning";
+    if (isBusyOrUnavailable) return "danger";
+    return "muted";
+  };
 
   return (
-    <section className="health-strip" aria-label="System Health and Telemetry Status">
+    <section className="health-strip" aria-label="System Health and Telemetry Status" onClick={onOpenStatus} style={{ cursor: onOpenStatus ? "pointer" : "default" }} title={onOpenStatus ? "Click to view System Status Center" : undefined}>
       <div className="health-item">
-        <span className={`health-dot ${isCameraHealthy && isRunning ? "good" : cameraState === "NO_FRAMES" ? "warning" : cameraState === "CAMERA_ERROR" ? "danger" : "muted"}`} />
+        <span className={`health-dot ${getCameraStatusDotClass()}`} />
         <span className="health-label">CAMERA:</span>
-        <span className="health-val">{isCameraHealthy ? "Ready" : cameraState === "NO_FRAMES" ? "No Frames" : cameraState === "CAMERA_ERROR" ? "Error" : "Standby"}</span>
+        <span className="health-val">{getCameraStatusLabel()}</span>
       </div>
 
       <div className="health-divider" />

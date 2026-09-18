@@ -31,6 +31,7 @@ import { ReportsView } from "./components/ReportsView";
 import { PrivacyView } from "./components/PrivacyView";
 import { SettingsView } from "./components/SettingsView";
 import { AlertProvider, useAlerts } from "./contexts/AlertContext";
+import { StatusCenterModal } from "./components/StatusCenterModal";
 
 const getApiBase = () => {
   if (window.location.port === "5173") {
@@ -50,6 +51,7 @@ function DashboardInner() {
   const { token } = useAuth();
   const { handleIntervention, handleResolution, resetSession } = useAlerts();
   const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
+  const [statusCenterOpen, setStatusCenterOpen] = useState<boolean>(false);
   // Navigation & Shell state
   const [activeSection, setActiveSection] = useState<string>("overview");
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
@@ -487,9 +489,11 @@ function DashboardInner() {
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
           apiBase={getApiBase()}
           onOpenAuth={() => setAuthModalOpen(true)}
+          onOpenStatus={() => setStatusCenterOpen(true)}
         />
 
         <SystemHealth
+          onOpenStatus={() => setStatusCenterOpen(true)}
           monitoringState={monitoringState}
           cameraState={cameraState}
           backendConnected={backendStatus === "connected"}
@@ -573,6 +577,15 @@ function DashboardInner() {
             <span>VisionGuard Pro • Real-Time Human Safety &amp; Wellness Intelligence</span>
           </div>
           <div className="footer-right">
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setStatusCenterOpen(true)}
+              style={{ fontSize: "11px", padding: "4px 10px" }}
+              title="Open System Status Center"
+              id="btn-status-center"
+            >
+              System Status
+            </button>
             <span className="footer-status-pill">
               Backend: {backendStatus.toUpperCase()} &bull; WS: {wsStatus.toUpperCase()}
             </span>
@@ -592,6 +605,19 @@ function DashboardInner() {
           onReset={activeCalibrationModal === "posture" ? resetPostureCalibration : resetAlertnessCalibration}
         />
       )}
+
+      {/* System Status Center */}
+      <StatusCenterModal
+        isOpen={statusCenterOpen}
+        onClose={() => setStatusCenterOpen(false)}
+        monitoringState={monitoringState}
+        cameraState={cameraState}
+        backendConnected={backendStatus === "connected"}
+        wsConnected={wsStatus === "connected"}
+        framesReceived={framesReceived}
+        apiBase={getApiBase()}
+        appVersion="1.0.0"
+      />
 
       {/* SaaS Auth Modal */}
       <AuthModal

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stopColor="#10b981" />
+      <stop offset="100%" stopColor="#059669" />
+    </linearGradient>
+    <linearGradient id="eyeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stopColor="#38bdf8" />
+      <stop offset="100%" stopColor="#0284c7" />
+    </linearGradient>
+  </defs>
+  <!-- Shield Background -->
+  <path d="M32 4L8 14V30C8 44.5 18.2 56.4 32 60C45.8 56.4 56 44.5 56 30V14L32 4Z" fill="url(#shieldGrad)" />
+  <!-- Inner Shield Glow -->
+  <path d="M32 8L12 16.5V29C12 41.5 20.5 52 32 55.5C43.5 52 52 41.5 52 29V16.5L32 8Z" fill="#0f172a" />
+  <!-- Protective Eye Icon -->
+  <path d="M18 32C22 24 42 24 46 32C42 40 22 40 18 32Z" stroke="url(#eyeGrad)" stroke-width="3" fill="none" stroke-linejoin="round" />
+  <!-- Iris / Pupil -->
+  <circle cx="32" cy="32" r="5" fill="#38bdf8" />
+  <circle cx="33.5" cy="30.5" r="1.5" fill="#ffffff" />
+</svg>

@@ -2,6 +2,7 @@ import "./index.css";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { registerServiceWorker } from "./services/serviceWorkerRegistration";
 
 const container = document.getElementById("root") as HTMLElement | null;
 if (!container) {
@@ -13,3 +14,9 @@ ReactDOM.createRoot(container).render(
     <App />
   </React.StrictMode>
 );
+
+// Register service worker in production
+registerServiceWorker(() => {
+  // Dispatch custom event if service worker has a pending update
+  window.dispatchEvent(new CustomEvent("visionguard-sw-update"));
+});
