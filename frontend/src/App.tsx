@@ -28,6 +28,8 @@ import { AuthModal } from "./components/AuthModal";
 import { SessionHistoryView } from "./components/SessionHistoryView";
 import { AnalyticsView } from "./components/AnalyticsView";
 import { PrivacyView } from "./components/PrivacyView";
+import { SettingsView } from "./components/SettingsView";
+import { AlertProvider, useAlerts } from "./contexts/AlertContext";
 
 const getApiBase = () => {
   if (window.location.port === "5173") {
@@ -45,6 +47,7 @@ const getWsUrl = () => {
 
 function DashboardInner() {
   const { token } = useAuth();
+  const { handleIntervention, handleResolution, resetSession } = useAlerts();
   const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
   // Navigation & Shell state
   const [activeSection, setActiveSection] = useState<string>("overview");
@@ -106,11 +109,7 @@ function DashboardInner() {
   const [eventHistory, setEventHistory] = useState<RiskEvent[]>([]);
   const [activeIntervention, setActiveIntervention] = useState<Intervention | null>(null);
 
-  // Browser Notification state & deduplication ref
-  const [browserNotificationPerm, setBrowserNotificationPerm] = useState<NotificationPermission>(
-    typeof Notification !== "undefined" ? Notification.permission : "default"
-  );
-  const lastNotifiedInterventionIdRef = useRef<string | null>(null);
+
 
   const [isActionInProgress, setIsActionInProgress] = useState(false);
 
@@ -172,6 +171,15 @@ function DashboardInner() {
             setHumanState(msg.data);
             if (msg.data.active_intervention !== undefined) {
               setActiveIntervention(msg.data.active_intervention);
+              if (msg.data.active_intervention) {
+                handleIntervention(msg.data.active_intervention);
+              }
+            }
+            if (msg.data.posture_status === "GOOD") {
+              handleResolution("POSTURE");
+            }
+            if (msg.data.alertness_status === "ALERT") {
+              handleResolution("ALERTNESS");
             }
           } else if (msg.type === "status" && msg.data) {
             if (msg.data.state) {
@@ -267,20 +275,8 @@ function DashboardInner() {
         setRiskStatus(data);
         setActiveIntervention(data.active_intervention);
 
-        // Handle Optional Browser Notification
-        if (data.active_intervention && browserNotificationPerm === "granted") {
-          const inv = data.active_intervention;
-          if (inv.intervention_id !== lastNotifiedInterventionIdRef.current) {
-            lastNotifiedInterventionIdRef.current = inv.intervention_id;
-            try {
-              new Notification(inv.title, {
-                body: inv.message,
-                icon: "/favicon.ico",
-              });
-            } catch (e) {
-              console.error("Browser notification error", e);
-            }
-          }
+        if (data.active_intervention) {
+          handleIntervention(data.active_intervention);
         }
       }
     } catch {
@@ -311,18 +307,7 @@ function DashboardInner() {
     }
   }
 
-  // Explicit user action for browser notification permission
-  async function requestNotificationPermission() {
-    if (typeof Notification === "undefined") {
-      return;
-    }
-    try {
-      const perm = await Notification.requestPermission();
-      setBrowserNotificationPerm(perm);
-    } catch (e) {
-      console.error("Permission request error", e);
-    }
-  }
+
 
   // --- Monitoring Controls ---
   async function toggleMonitoring() {
@@ -350,6 +335,7 @@ function DashboardInner() {
         const res = await fetch(`${getApiBase()}/api/v1/monitoring/stop`, { method: "POST" });
         if (res.ok) {
           setMonitoringState("STOPPED");
+          resetSession();
         }
       }
       await fetchMonitoringStatus();
@@ -497,8 +483,6 @@ function DashboardInner() {
           cameraState={cameraState}
           isStarting={isStartingMonitoring}
           onToggleMonitoring={toggleMonitoring}
-          notificationPermission={browserNotificationPerm}
-          onRequestNotifications={requestNotificationPermission}
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
           apiBase={getApiBase()}
           onOpenAuth={() => setAuthModalOpen(true)}
@@ -529,6 +513,8 @@ function DashboardInner() {
               apiBase={getApiBase()}
               onOpenAuth={() => setAuthModalOpen(true)}
             />
+          ) : activeSection === "settings-section" ? (
+            <SettingsView />
           ) : (
             <>
               {/* Top Primary Grid: Live Camera (60-65%) + Risk Intelligence (35-40%) */}
@@ -616,7 +602,9 @@ function DashboardInner() {
 export function App() {
   return (
     <AuthProvider>
-      <DashboardInner />
+      <AlertProvider apiBase={getApiBase()}>
+        <DashboardInner />
+      </AlertProvider>
     </AuthProvider>
   );
 }

@@ -16,6 +16,13 @@ ALLOWED_RISK_EVENT_FIELDS = {
     "severity", "reason", "lifecycle", "duration_seconds", "metadata"
 }
 
+ALLOWED_USER_PREFERENCE_FIELDS = {
+    "user_id", "browser_notifications_enabled", "data_retention_days",
+    "voice_alerts_enabled", "voice_volume", "voice_rate", "voice_pitch",
+    "quiet_mode_enabled", "selected_voice"
+}
+
+
 class SupabaseSessionRepository:
     """
     Communicates with Supabase / PostgREST using the authenticated user's JWT.
@@ -50,6 +57,9 @@ class SupabaseSessionRepository:
 
     def filter_risk_event_payload(self, data: Dict[str, Any]) -> Dict[str, Any]:
         return {k: v for k, v in data.items() if k in ALLOWED_RISK_EVENT_FIELDS}
+
+    def filter_preference_payload(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        return {k: v for k, v in data.items() if k in ALLOWED_USER_PREFERENCE_FIELDS}
 
     async def create_session(self, token: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         clean_data = self.filter_session_payload(payload)
@@ -117,6 +127,54 @@ class SupabaseSessionRepository:
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.delete(url, headers=self._get_headers(token, prefer_return=False))
             return resp.status_code in (200, 204)
+
+    async def get_user_preferences(self, user_id: str, token: str) -> Dict[str, Any]:
+        """Fetches user preferences from Supabase, returning defaults if none exist yet."""
+        defaults = {
+            "user_id": user_id,
+            "browser_notifications_enabled": False,
+            "voice_alerts_enabled": False,
+            "voice_volume": 0.8,
+            "voice_rate": 1.0,
+            "voice_pitch": 1.0,
+            "quiet_mode_enabled": False,
+            "selected_voice": None,
+            "data_retention_days": None,
+        }
+        if not self.base_url:
+            return defaults
+
+        url = f"{self.base_url}/user_preferences?user_id=eq.{user_id}"
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(url, headers=self._get_headers(token))
+                if resp.status_code == 200:
+                    rows = resp.json()
+                    if rows:
+                        defaults.update(rows[0])
+        except Exception:
+            pass
+        return defaults
+
+    async def upsert_user_preferences(self, user_id: str, token: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Upserts user preferences in Supabase adhering to RLS."""
+        clean_data = self.filter_preference_payload(payload)
+        clean_data["user_id"] = user_id
+
+        if not self.base_url:
+            return clean_data
+
+        url = f"{self.base_url}/user_preferences"
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                url,
+                headers=self._get_headers(token, prefer_return=True, upsert=True),
+                json=clean_data
+            )
+            if resp.status_code in (200, 201):
+                results = resp.json()
+                return results[0] if results else clean_data
+            resp.raise_for_status()
 
     async def delete_user_data(self, user_id: str, token: str) -> Dict[str, Any]:
         """

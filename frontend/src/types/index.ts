@@ -173,3 +173,29 @@ export interface AnalyticsSummary {
   moderate_risk_count: number;
   high_risk_count: number;
 }
+
+
+export type AlertChannel = "IN_APP" | "BROWSER_NOTIFICATION" | "VOICE";
+export type AlertPriority = "LOW" | "NORMAL" | "HIGH";
+
+export interface AlertAction {
+  channel: AlertChannel;
+  priority: AlertPriority;
+  title: string;
+  message: string;
+  intervention_id: string;
+  category: RiskCategory;
+  level: RiskLevel;
+}
+
+export interface UserPreferences {
+  user_id?: string;
+  browser_notifications_enabled: boolean;
+  voice_alerts_enabled: boolean;
+  voice_volume: number;
+  voice_rate: number;
+  voice_pitch: number;
+  quiet_mode_enabled: boolean;
+  selected_voice: string | null;
+  data_retention_days?: number;
+}

@@ -1,4 +1,4 @@
-"""VisionGuard Mission 05: Alert and Intervention Models."""
+"""VisionGuard Mission 05 & 07: Alert and Intervention Models."""
 
 from __future__ import annotations
 
@@ -21,6 +21,21 @@ class InterventionType(str, Enum):
     """Channel through which an intervention is delivered."""
     IN_APP = "IN_APP"
     BROWSER_NOTIFICATION = "BROWSER_NOTIFICATION"
+    VOICE = "VOICE"
+
+
+class AlertChannel(str, Enum):
+    """Delivery channels for alerts."""
+    IN_APP = "IN_APP"
+    BROWSER_NOTIFICATION = "BROWSER_NOTIFICATION"
+    VOICE = "VOICE"
+
+
+class AlertPriority(str, Enum):
+    """Priority classification for alerts."""
+    NORMAL = "NORMAL"
+    IMPORTANT = "IMPORTANT"
+    CRITICAL = "CRITICAL"
 
 
 class RiskEvent(BaseModel):
@@ -48,3 +63,19 @@ class Intervention(BaseModel):
     title: str
     message: str
     type: InterventionType = InterventionType.IN_APP
+
+
+class AlertAction(BaseModel):
+    """Actionable alert dispatch directive determined by AlertOrchestrator.
+
+    Strict privacy: zero camera, face, or pose landmark data.
+    """
+    alert_id: str = Field(..., description="Unique alert directive identifier")
+    intervention_id: str = Field(..., description="Associated intervention identifier")
+    category: RiskCategory
+    risk_level: RiskLevel
+    channel: AlertChannel
+    message: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    priority: AlertPriority = AlertPriority.NORMAL
+    requires_acknowledgement: bool = False

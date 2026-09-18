@@ -1,15 +1,14 @@
-﻿import React from "react";
+import React from "react";
 import { MonitoringState } from "../types";
 import { CloudSyncPill } from "./CloudSyncPill";
 import { useAuth } from "../contexts/AuthContext";
+import { useAlerts } from "../contexts/AlertContext";
 
 interface HeaderProps {
   monitoringState: MonitoringState;
   cameraState: string;
   isStarting: boolean;
   onToggleMonitoring: () => void;
-  notificationPermission: NotificationPermission;
-  onRequestNotifications: () => void;
   onToggleSidebar: () => void;
   apiBase: string;
   onOpenAuth: () => void;
@@ -20,13 +19,19 @@ export const Header: React.FC<HeaderProps> = ({
   cameraState,
   isStarting,
   onToggleMonitoring,
-  notificationPermission,
-  onRequestNotifications,
   onToggleSidebar,
   apiBase,
   onOpenAuth,
 }) => {
   const { user, signOut } = useAuth();
+  const {
+    isMuted,
+    toggleMute,
+    quietModeEnabled,
+    browserPermission,
+    requestBrowserNotifications,
+  } = useAlerts();
+
   const isRunning = monitoringState === "RUNNING";
   const isError = monitoringState === "CAMERA_ERROR" || cameraState === "CAMERA_ERROR";
   const isNoFrames = monitoringState === "NO_FRAMES" || cameraState === "NO_FRAMES";
@@ -66,6 +71,42 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       <div className="header-right">
+        {/* Quiet Mode Indicator */}
+        {quietModeEnabled && (
+          <div className="system-pill" style={{ borderColor: "#f59e0b", color: "#f59e0b" }} title="Quiet Mode is active: voice alerts and notifications silenced">
+            <span style={{ fontSize: "11px", fontWeight: 600 }}>QUIET MODE</span>
+          </div>
+        )}
+
+        {/* Audio Mute Quick Toggle */}
+        <button
+          className={`btn btn-sm ${isMuted ? "btn-danger" : "btn-secondary"}`}
+          onClick={toggleMute}
+          title={isMuted ? "Unmute Voice Alerts" : "Mute Voice Alerts (immediately cancels active speech)"}
+          style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+        >
+          {isMuted ? (
+            <>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="1" y1="1" x2="23" y2="23" />
+                <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
+                <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
+                <line x1="12" y1="19" x2="12" y2="23" />
+                <line x1="8" y1="23" x2="16" y2="23" />
+              </svg>
+              <span>Muted</span>
+            </>
+          ) : (
+            <>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" />
+              </svg>
+              <span>Voice</span>
+            </>
+          )}
+        </button>
+
         {/* Cloud Sync Status Pill */}
         <CloudSyncPill apiBase={apiBase} />
 
@@ -75,22 +116,22 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         <div className="notification-control">
-          {notificationPermission === "granted" ? (
+          {browserPermission === "granted" ? (
             <span className="notif-status-badge" title="Browser notifications enabled">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
                 <path d="M13.73 21a2 2 0 0 1-3.46 0" />
               </svg>
-              <span>Notifications ON</span>
+              <span>Alerts ON</span>
             </span>
-          ) : notificationPermission === "denied" ? (
+          ) : browserPermission === "denied" ? (
             <span className="notif-status-badge blocked" title="Notifications blocked in browser settings">
-              <span>Notifications Blocked</span>
+              <span>Alerts Blocked</span>
             </span>
           ) : (
             <button
               className="btn btn-secondary btn-sm notif-btn"
-              onClick={onRequestNotifications}
+              onClick={requestBrowserNotifications}
               title="Click to enable desktop browser alerts for high-risk interventions"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

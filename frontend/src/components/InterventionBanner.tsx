@@ -1,13 +1,16 @@
 import React from "react";
 import { Intervention } from "../types";
 import { StatusBadge } from "./StatusBadge";
+import { useAlerts } from "../contexts/AlertContext";
 
 interface InterventionBannerProps {
   intervention: Intervention | null;
 }
 
 export const InterventionBanner: React.FC<InterventionBannerProps> = ({ intervention }) => {
-  if (!intervention) {
+  const { acknowledgeAlert, isAcknowledged } = useAlerts();
+
+  if (!intervention || isAcknowledged(intervention.intervention_id)) {
     return (
       <section className="intervention-strip calm" aria-label="Active Wellness Intervention">
         <div className="intervention-calm-content">
@@ -35,8 +38,15 @@ export const InterventionBanner: React.FC<InterventionBannerProps> = ({ interven
         <h4 className="intervention-title">{intervention.title}</h4>
         <p className="intervention-message">{intervention.message}</p>
       </div>
-      <div className="intervention-badge-wrap">
+      <div className="intervention-badge-wrap" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
         <StatusBadge type="risk" value={intervention.level} />
+        <button
+          className="btn btn-sm btn-secondary"
+          onClick={() => acknowledgeAlert(intervention.intervention_id)}
+          title="Acknowledge alert and hide banner"
+        >
+          Got it
+        </button>
       </div>
     </section>
   );
