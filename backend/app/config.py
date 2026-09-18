@@ -19,6 +19,9 @@ SUPABASE_JWT_SECRET: Optional[str] = os.getenv("SUPABASE_JWT_SECRET")
 
 
 # CORS - Mission 09: explicit allowlist; never wildcard in production
+# Development localhost ports safely supported without wildcard
+DEV_VITE_PORTS = [5173, 5174, 5175, 5176, 5177, 5178, 5179, 4173, 4174, 4175, 8000, 3000]
+
 _CORS_ENV = os.getenv("CORS_ALLOWED_ORIGINS", "")
 if _CORS_ENV:
     try:
@@ -26,14 +29,10 @@ if _CORS_ENV:
     except Exception:
         CORS_ALLOWED_ORIGINS = [o.strip() for o in _CORS_ENV.split(",") if o.strip()]
 else:
-    CORS_ALLOWED_ORIGINS = [
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:4173",
-        "http://127.0.0.1:4173",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-    ]
+    CORS_ALLOWED_ORIGINS = []
+    for port in DEV_VITE_PORTS:
+        CORS_ALLOWED_ORIGINS.append(f"http://localhost:{port}")
+        CORS_ALLOWED_ORIGINS.append(f"http://127.0.0.1:{port}")
 
 def is_cloud_configured() -> bool:
     """Return True if basic Supabase credentials are configured."""

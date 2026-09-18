@@ -199,6 +199,7 @@ export interface UserPreferences {
   selected_voice: string | null;
   data_retention_days?: number;
   timezone?: string | null;
+  alert_language?: "en" | "ta" | "en+ta";
 }
 
 // ==========================================

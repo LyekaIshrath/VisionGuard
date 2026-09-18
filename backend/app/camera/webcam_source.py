@@ -3,9 +3,10 @@
 import platform
 import threading
 import time
-from typing import Optional, Callable, Tuple
+from typing import Optional, Callable, Tuple, Union
 
 import cv2
+import numpy as np
 
 from app.camera.source import CameraSource
 from app.human_state.models import HumanState
@@ -25,6 +26,8 @@ class WebcamSource:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._frame: Optional[bytes] = None
+        self._latest_raw_frame: Optional[np.ndarray] = None
+        self._latest_frame_id: int = 0
         self._frame_lock = threading.Lock()
         self._health_status = "NOT_CONFIGURED"
         self._frame_callback: Optional[Callable[[Optional[bytes]], None]] = None
@@ -55,6 +58,11 @@ class WebcamSource:
                 try:
                     cap = cv2.VideoCapture(idx, b_val)
                     if cap.isOpened():
+                        # Set optimal preview / capture properties
+                        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+                        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                        cap.set(cv2.CAP_PROP_FPS, 30)
                         # Verify we can actually read a valid frame!
                         ret, test_frame = cap.read()
                         if ret and test_frame is not None and hasattr(test_frame, 'shape') and len(test_frame.shape) == 3:
@@ -95,19 +103,35 @@ class WebcamSource:
         self._thread = threading.Thread(target=self._read_loop, daemon=True)
         self._thread.start()
 
+    def read_raw(self) -> Tuple[int, Optional[np.ndarray]]:
+        """Return monotonic frame ID and raw BGR numpy frame without JPEG encoding."""
+        with self._frame_lock:
+            return self._latest_frame_id, self._latest_raw_frame
+
     def read(self) -> Optional[bytes]:
-        """Read the latest available frame.
-
-        Returns the most recent frame bytes (BGR JPEG-encoded),
-        or None if no frame is available.
-        """
+        """Read the latest available frame as JPEG bytes (CameraSource protocol)."""
         with self._frame_lock:
-            return self._frame
+            if self._frame is not None:
+                return self._frame
+            if self._latest_raw_frame is not None:
+                small = cv2.resize(self._latest_raw_frame, (640, 480))
+                ok, buf = cv2.imencode(".jpg", small, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                if ok:
+                    self._frame = buf.tobytes()
+                    return self._frame
+            return None
 
-    def write_frame(self, frame_bytes: bytes) -> None:
-        """Internal: called by the background loop to store the latest frame."""
+    def write_frame(self, frame_data: Union[bytes, np.ndarray]) -> None:
+        """Store latest frame accepting either raw numpy array or JPEG bytes."""
         with self._frame_lock:
-            self._frame = frame_bytes
+            self._latest_frame_id += 1
+            if isinstance(frame_data, bytes):
+                self._frame = frame_data
+                nparr = np.frombuffer(frame_data, np.uint8)
+                self._latest_raw_frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            else:
+                self._latest_raw_frame = frame_data
+                self._frame = None
 
     def stop(self) -> None:
         """Stop the webcam capture and release resources."""
@@ -154,42 +178,36 @@ class WebcamSource:
                     self._frames_received += 1
                     self._health_status = "READY"
 
-                    # Encode as JPEG for efficient distribution
-                    try:
-                        small = cv2.resize(frame, (640, 480))
-                        ok, buf = cv2.imencode(".jpg", small, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-                        frame_bytes = buf.tobytes() if ok else None
-                    except Exception:
-                        frame_bytes = None
+                    # Publish newest raw frame into single-frame slot (dropping old frames)
+                    with self._frame_lock:
+                        self._latest_frame_id += 1
+                        self._latest_raw_frame = frame
+                        self._frame = None
 
-                    # Store for consumers via thread-safe buffer
-                    if frame_bytes is not None:
-                        self.write_frame(frame_bytes)
-
-                        # Call registered callback
-                        if self._frame_callback is not None:
-                            try:
-                                self._frame_callback(frame_bytes)
-                            except Exception:
-                                pass
+                    # Fire callback if registered (non-blocking notification)
+                    if self._frame_callback is not None:
+                        try:
+                            self._frame_callback(frame)
+                        except Exception:
+                            pass
                 else:
                     consecutive_failures += 1
                     if consecutive_failures >= 30:  # ~1 second of failed reads
                         self._health_status = "NO_FRAMES"
+                    time.sleep(0.01)
 
             except cv2.error:
                 consecutive_failures += 1
                 if consecutive_failures >= 30:
                     self._health_status = "CAMERA_ERROR"
                     break
+                time.sleep(0.01)
             except Exception:
                 consecutive_failures += 1
                 if consecutive_failures >= 30:
                     self._health_status = "CAMERA_ERROR"
                     break
-
-            if self._running:
-                time.sleep(0.03)  # ~30 FPS max read loop
+                time.sleep(0.01)
 
         if self._running:
             self._health_status = "CAMERA_ERROR"

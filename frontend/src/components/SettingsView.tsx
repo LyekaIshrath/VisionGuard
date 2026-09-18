@@ -10,6 +10,8 @@ export const SettingsView: React.FC = () => {
     voiceRate,
     voicePitch,
     selectedVoice,
+    alertLanguage,
+    setAlertLanguage,
     browserNotificationsEnabled,
     browserPermission,
     availableVoices,
@@ -108,7 +110,34 @@ export const SettingsView: React.FC = () => {
             </div>
 
             <div className="setting-item-block">
-              <label htmlFor="voice-select" className="setting-label">Synthesizer Voice</label>
+              <label htmlFor="alert-language-select" className="setting-label">Alert Language</label>
+              <p className="setting-description">
+                Choose the spoken alert language. VisionGuard uses natural studio-quality pre-rendered audio for English and தமிழ்.
+              </p>
+              <select
+                id="alert-language-select"
+                className="form-select"
+                value={alertLanguage}
+                onChange={(e) => setAlertLanguage(e.target.value as "en" | "ta" | "en+ta")}
+                disabled={!voiceAlertsEnabled || quietModeEnabled}
+              >
+                <option value="en">English (Natural Studio Audio)</option>
+                <option value="ta">தமிழ் (இயற்கையான குரல்)</option>
+                <option value="en+ta">English + தமிழ் (Bilingual Sequential)</option>
+              </select>
+            </div>
+
+            <div className="setting-item-block">
+              <span className="setting-label">Spoken Voice Capability</span>
+              <p className="setting-description">
+                {availableVoices.some((v) => v.lang.toLowerCase().startsWith("ta"))
+                  ? "Local Tamil speech synthesizer detected. Natural pre-rendered studio audio is prioritized for crisp alerts."
+                  : "No native Tamil system synthesizer detected. VisionGuard automatically delivers natural pre-rendered Tamil audio assets without English voice fallback."}
+              </p>
+            </div>
+
+            <div className="setting-item-block">
+              <label htmlFor="voice-select" className="setting-label">Synthesizer Voice (Dynamic English)</label>
               <select
                 id="voice-select"
                 className="form-select"

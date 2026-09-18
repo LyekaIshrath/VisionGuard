@@ -3,6 +3,7 @@ import { Intervention, UserPreferences } from "../types";
 import { speechProvider } from "../services/voiceAlertProvider";
 import { voiceQueue } from "../services/voiceQueue";
 import { notificationService } from "../services/browserNotifications";
+import { apiFetch } from "../services/apiClient";
 import { useAuth } from "./AuthContext";
 
 interface AlertContextValue {
@@ -13,12 +14,14 @@ interface AlertContextValue {
   voiceRate: number;
   voicePitch: number;
   selectedVoice: string | null;
+  alertLanguage: "en" | "ta" | "en+ta";
   browserNotificationsEnabled: boolean;
   browserPermission: NotificationPermission;
   availableVoices: SpeechSynthesisVoice[];
   acknowledgedAlertIds: Set<string>;
   toggleMute: () => void;
   setQuietMode: (enabled: boolean) => Promise<void>;
+  setAlertLanguage: (lang: "en" | "ta" | "en+ta") => Promise<void>;
   updatePreferences: (updates: Partial<UserPreferences>) => Promise<void>;
   requestBrowserNotifications: () => Promise<boolean>;
   acknowledgeAlert: (interventionId: string) => Promise<void>;
@@ -31,21 +34,19 @@ interface AlertContextValue {
 
 const DEFAULT_PREFERENCES: UserPreferences = {
   browser_notifications_enabled: false,
-  voice_alerts_enabled: true,
+  voice_alerts_enabled: false,
   voice_volume: 0.8,
   voice_rate: 1.0,
   voice_pitch: 1.0,
   quiet_mode_enabled: false,
   selected_voice: null,
-  timezone: null,
+  data_retention_days: undefined,
+  alert_language: "en",
 };
 
 const AlertContext = createContext<AlertContextValue | null>(null);
 
-export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: string }> = ({
-  children,
-  apiBase = "http://localhost:8000",
-}) => {
+export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: string }> = ({ children, apiBase = "" }) => {
   const { user, token } = useAuth();
 
   // Transient runtime state (never saved to database)
@@ -75,27 +76,39 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
       return;
     }
 
-    fetch(`${apiBase}/api/v1/user/preferences`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    })
-      .then((res) => {
-        if (res.ok) return res.json();
-        return null;
-      })
-      .then((data) => {
-        if (data && data.preferences) {
-          setPreferences((prev) => ({
-            ...prev,
-            ...data.preferences,
-          }));
+    let isMounted = true;
+    const fetchUserPreferences = async () => {
+      try {
+        const resp = await apiFetch(`${apiBase}/api/v1/user/preferences`);
+        if (resp.ok) {
+          const data = await resp.json();
+          if (isMounted) {
+            setPreferences((prev) => ({
+              ...prev,
+              browser_notifications_enabled: data.browser_notifications_enabled ?? prev.browser_notifications_enabled,
+              voice_alerts_enabled: data.voice_alerts_enabled ?? prev.voice_alerts_enabled,
+              voice_volume: data.voice_volume ?? prev.voice_volume,
+              voice_rate: data.voice_rate ?? prev.voice_rate,
+              voice_pitch: data.voice_pitch ?? prev.voice_pitch,
+              quiet_mode_enabled: data.quiet_mode_enabled ?? prev.quiet_mode_enabled,
+              selected_voice: data.selected_voice ?? prev.selected_voice,
+              data_retention_days: data.data_retention_days ?? prev.data_retention_days,
+              alert_language: data.alert_language ?? prev.alert_language ?? "en",
+            }));
+          }
         }
-      })
-      .catch((err) => console.warn("Failed to load user preferences:", err));
+      } catch (err) {
+        console.warn("Could not fetch remote user preferences, using local defaults:", err);
+      }
+    };
+
+    fetchUserPreferences();
+    return () => {
+      isMounted = false;
+    };
   }, [user, token, apiBase]);
 
-  // Toggle Mute: transient runtime toggle that immediately cancels active & queued speech
+  // Toggle Mute (transient runtime action)
   const toggleMute = useCallback(() => {
     setIsMuted((prev) => {
       const next = !prev;
@@ -114,25 +127,24 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
       if (!token) return;
 
       try {
-        await fetch(`${apiBase}/api/v1/user/preferences`, {
+        await apiFetch(`${apiBase}/api/v1/user/preferences`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify(updates),
         });
       } catch (err) {
-        console.error("Failed to persist user preferences:", err);
+        console.error("Failed to persist user preferences to backend:", err);
       }
     },
     [token, apiBase]
   );
 
+  // Set Quiet Mode helper
   const setQuietMode = useCallback(
     async (enabled: boolean) => {
       if (enabled) {
-        // Quiet mode immediately clears any pending speech
         voiceQueue.clearAll();
       }
       await updatePreferences({ quiet_mode_enabled: enabled });
@@ -140,11 +152,19 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
     [updatePreferences]
   );
 
-  // Request browser notifications on explicit user button click
+  // Set Alert Language helper
+  const setAlertLanguage = useCallback(
+    async (lang: "en" | "ta" | "en+ta") => {
+      await updatePreferences({ alert_language: lang });
+    },
+    [updatePreferences]
+  );
+
+  // Request browser notification permission
   const requestBrowserNotifications = useCallback(async (): Promise<boolean> => {
-    const perm = await notificationService.requestPermission();
-    setBrowserPermission(perm);
-    if (perm === "granted") {
+    const granted = await notificationService.requestPermission();
+    setBrowserPermission(notificationService.getPermission());
+    if (granted) {
       await updatePreferences({ browser_notifications_enabled: true });
       return true;
     }
@@ -158,11 +178,10 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
 
       if (!token) return;
       try {
-        await fetch(`${apiBase}/api/v1/user/alerts/acknowledge`, {
+        await apiFetch(`${apiBase}/api/v1/user/alerts/acknowledge`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ intervention_id: interventionId }),
         });
@@ -181,11 +200,20 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
   // Test Voice Alert
   const testVoiceAlert = useCallback(() => {
     if (isMuted) return;
-    const testPhrase = "This is a VisionGuard voice alert test.";
+    const lang = preferences.alert_language || "en";
+    let testText = "Please adjust your sitting posture.";
+    if (lang === "ta") {
+      testText = "உங்கள் அமரும் தோரணையை சரிசெய்யவும்.";
+    } else if (lang === "en+ta") {
+      testText = "Please adjust your sitting posture. உங்கள் அமரும் தோரணையை சரிசெய்யவும்.";
+    }
+
     voiceQueue.enqueue(
       {
         id: `test-voice-${Date.now()}`,
-        text: testPhrase,
+        text: testText,
+        audioKey: "posture_moderate",
+        language: lang,
         priority: "HIGH",
         category: "SYSTEM",
         timestamp: Date.now(),
@@ -216,10 +244,19 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
       // Condition: not quiet mode, not muted, voice_alerts_enabled, valid speech
       if (!preferences.quiet_mode_enabled && !isMuted && preferences.voice_alerts_enabled) {
         const priority = inv.level === "HIGH" ? "HIGH" : "NORMAL";
+        const cat = (inv.category || "").toLowerCase();
+        const lvl = (inv.level || "").toLowerCase();
+        let audioKey: string | undefined = undefined;
+        if (cat === "posture" || cat === "alertness") {
+          audioKey = `${cat}_${lvl}`;
+        }
+
         voiceQueue.enqueue(
           {
             id: inv.intervention_id,
             text: inv.message,
+            audioKey,
+            language: preferences.alert_language || "en",
             priority,
             category: inv.category,
             timestamp: Date.now(),
@@ -233,21 +270,12 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
         );
       }
 
-      // 2. Browser Notification Delivery
-      // Authoritative: Notification.permission === 'granted', preferences enabled, not in quiet mode
-      if (
-        !preferences.quiet_mode_enabled &&
-        preferences.browser_notifications_enabled &&
-        notificationService.getPermission() === "granted"
-      ) {
-        notificationService.showNotification(`VisionGuard: ${inv.title}`, {
-          body: inv.message,
-          category: inv.category,
-          tag: inv.category,
-        });
+      // 2. Desktop Notification Delivery
+      if (!preferences.quiet_mode_enabled && preferences.browser_notifications_enabled) {
+        notificationService.showNotification(inv.title, { body: inv.message, category: inv.category });
       }
     },
-    [preferences, isMuted]
+    [isMuted, preferences]
   );
 
   // Handle RESOLVED state
@@ -280,12 +308,14 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
     voiceRate: preferences.voice_rate,
     voicePitch: preferences.voice_pitch,
     selectedVoice: preferences.selected_voice,
+    alertLanguage: preferences.alert_language || "en",
     browserNotificationsEnabled: preferences.browser_notifications_enabled,
     browserPermission,
     availableVoices,
     acknowledgedAlertIds,
     toggleMute,
     setQuietMode,
+    setAlertLanguage,
     updatePreferences,
     requestBrowserNotifications,
     acknowledgeAlert,

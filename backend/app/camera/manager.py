@@ -1,7 +1,8 @@
 ﻿from __future__ import annotations
 
 import threading
-from typing import Optional, Callable
+from typing import Optional, Callable, Tuple
+import numpy as np
 
 from app.camera.source import CameraSource
 from app.camera.webcam_source import WebcamSource
@@ -110,6 +111,28 @@ class CameraManager:
         """Register a callback to be called on each new frame."""
         with self._lock:
             self._frame_callbacks.append(callback)
+
+    def get_latest_raw_frame(self) -> Tuple[int, Optional[np.ndarray]]:
+        """Return monotonic frame_id and newest raw BGR numpy ndarray."""
+        with self._lock:
+            if self._source is not None and hasattr(self._source, "read_raw"):
+                try:
+                    res = self._source.read_raw()
+                    if isinstance(res, tuple) and len(res) == 2:
+                        return res
+                except Exception:
+                    pass
+            return 0, None
+
+    def get_latest_raw_frame_only(self) -> Optional[np.ndarray]:
+        """Return newest raw BGR numpy ndarray directly or None."""
+        try:
+            res = self.get_latest_raw_frame()
+            if isinstance(res, tuple) and len(res) == 2:
+                return res[1]
+        except Exception:
+            pass
+        return None
 
     def get_latest_frame(self) -> Optional[bytes]:
         """Return the latest captured frame bytes, or None."""

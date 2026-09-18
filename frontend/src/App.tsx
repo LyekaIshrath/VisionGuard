@@ -25,6 +25,7 @@ import { EventTimeline } from "./components/EventTimeline";
 import { CalibrationModal } from "./components/CalibrationModal";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { AuthModal } from "./components/AuthModal";
+import { onAuthExpired } from "./services/apiClient";
 import { SessionHistoryView } from "./components/SessionHistoryView";
 import { AnalyticsView } from "./components/AnalyticsView";
 import { ReportsView } from "./components/ReportsView";
@@ -48,9 +49,17 @@ const getWsUrl = () => {
 };
 
 function DashboardInner() {
+  const { user } = useAuth();
   const { token } = useAuth();
   const { handleIntervention, handleResolution, resetSession } = useAlerts();
   const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
+  const [authExpiredNotice, setAuthExpiredNotice] = useState<boolean>(false);
+
+  useEffect(() => {
+    return onAuthExpired(() => {
+      setAuthExpiredNotice(true);
+    });
+  }, []);
   const [statusCenterOpen, setStatusCenterOpen] = useState<boolean>(false);
   // Navigation & Shell state
   const [activeSection, setActiveSection] = useState<string>("overview");
@@ -481,7 +490,30 @@ function DashboardInner() {
       />
 
       <div className="app-main-layout">
-        <Header
+        {authExpiredNotice && !user && (
+        <div style={{
+          background: "rgba(239, 68, 68, 0.15)",
+          border: "1px solid rgba(239, 68, 68, 0.4)",
+          color: "#fca5a5",
+          padding: "0.75rem 1.5rem",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          fontSize: "0.875rem"
+        }}>
+          <span>
+            <strong>Cloud Session Expired:</strong> Syncing is paused. Local monitoring, posture analysis, alertness detection, and alerts remain fully active.
+          </span>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => { setAuthExpiredNotice(false); setAuthModalOpen(true); }}
+            style={{ marginLeft: "1rem" }}
+          >
+            Sign In to Resume Sync
+          </button>
+        </div>
+      )}
+      <Header
           monitoringState={monitoringState}
           cameraState={cameraState}
           isStarting={isStartingMonitoring}

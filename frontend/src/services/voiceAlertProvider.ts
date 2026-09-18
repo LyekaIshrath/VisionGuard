@@ -3,12 +3,13 @@ export interface VoiceOptions {
   rate?: number;   // 0.5 to 2.0
   pitch?: number;  // 0.5 to 2.0
   voiceName?: string | null;
+  language?: "en" | "ta" | "en+ta";
 }
 
 export interface VoiceAlertProvider {
   isAvailable(): boolean;
   getVoices(): Promise<SpeechSynthesisVoice[]>;
-  speak(text: string, options?: VoiceOptions): Promise<void>;
+  speak(text: string, options?: VoiceOptions, language?: string): Promise<void>;
   cancel(): void;
   isSpeaking(): boolean;
 }
@@ -44,10 +45,20 @@ export class BrowserSpeechSynthesisProvider implements VoiceAlertProvider {
     });
   }
 
-  speak(text: string, options: VoiceOptions = {}): Promise<void> {
+  speak(text: string, options: VoiceOptions = {}, language: string = "en"): Promise<void> {
     return new Promise((resolve) => {
       if (!this.synth) {
         return resolve();
+      }
+
+      // CRITICAL AUDIO RULE: Never synthesize Tamil using an English voice.
+      if (language === "ta" || language === "ta-IN") {
+        const voices = this.synth.getVoices();
+        const hasTamilVoice = voices.some((v) => v.lang.toLowerCase().startsWith("ta"));
+        if (!hasTamilVoice) {
+          console.warn("[SpeechSynthesis] No native Tamil voice detected. Suppressing fake English synthesis.");
+          return resolve();
+        }
       }
 
       // Always cancel existing speech before starting new utterance
@@ -58,17 +69,30 @@ export class BrowserSpeechSynthesisProvider implements VoiceAlertProvider {
       if (options.rate !== undefined) utterance.rate = Math.max(0.5, Math.min(2.0, options.rate));
       if (options.pitch !== undefined) utterance.pitch = Math.max(0.5, Math.min(2.0, options.pitch));
 
+      if (language === "ta" || language === "ta-IN") {
+        utterance.lang = "ta-IN";
+      } else {
+        utterance.lang = "en-US";
+      }
+
       if (options.voiceName) {
         const voices = this.synth.getVoices();
         const found = voices.find((v) => v.name === options.voiceName);
         if (found) {
           utterance.voice = found;
         }
+      } else {
+        // Match exact language first
+        const voices = this.synth.getVoices();
+        const prefix = utterance.lang.split("-")[0].toLowerCase();
+        const matching = voices.find((v) => v.lang.toLowerCase().startsWith(prefix));
+        if (matching) {
+          utterance.voice = matching;
+        }
       }
 
       utterance.onend = () => resolve();
       utterance.onerror = (e) => {
-        // "interrupted" and "canceled" are normal cancellation events
         if (e.error !== "interrupted" && e.error !== "canceled") {
           console.warn("SpeechSynthesis error:", e.error);
         }

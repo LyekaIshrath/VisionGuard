@@ -1,3 +1,4 @@
+import { apiFetch } from "../services/apiClient";
 ﻿import React, { useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -20,7 +21,7 @@ export const PrivacyView: React.FC<PrivacyViewProps> = ({
     setDeleting(true);
     setDeleteMessage(null);
     try {
-      const resp = await fetch(`${apiBase}/api/v1/user/data`, {
+      const resp = await apiFetch(`${apiBase}/api/v1/user/data`, {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${token}`,

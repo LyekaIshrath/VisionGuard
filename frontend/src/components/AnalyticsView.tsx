@@ -1,3 +1,4 @@
+import { apiFetch } from "../services/apiClient";
 import React, { useEffect, useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import {
@@ -44,11 +45,11 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ apiBase = "", onOp
       const headers = { Authorization: `Bearer ${token}` };
 
       const [ovRes, trRes, todRes, inRes, gRes] = await Promise.all([
-        fetch(`${apiBase}/api/v1/analytics/overview?days=${days}&tz=${encodeURIComponent(browserTz)}`, { headers }),
-        fetch(`${apiBase}/api/v1/analytics/trends?days=${days}&tz=${encodeURIComponent(browserTz)}`, { headers }),
-        fetch(`${apiBase}/api/v1/analytics/patterns?days=${days}&tz=${encodeURIComponent(browserTz)}`, { headers }),
-        fetch(`${apiBase}/api/v1/analytics/insights?days=${days}&tz=${encodeURIComponent(browserTz)}`, { headers }),
-        fetch(`${apiBase}/api/v1/goals?tz=${encodeURIComponent(browserTz)}`, { headers }),
+        apiFetch(`${apiBase}/api/v1/analytics/overview?days=${days}&tz=${encodeURIComponent(browserTz)}`, { headers }),
+        apiFetch(`${apiBase}/api/v1/analytics/trends?days=${days}&tz=${encodeURIComponent(browserTz)}`, { headers }),
+        apiFetch(`${apiBase}/api/v1/analytics/patterns?days=${days}&tz=${encodeURIComponent(browserTz)}`, { headers }),
+        apiFetch(`${apiBase}/api/v1/analytics/insights?days=${days}&tz=${encodeURIComponent(browserTz)}`, { headers }),
+        apiFetch(`${apiBase}/api/v1/goals?tz=${encodeURIComponent(browserTz)}`, { headers }),
       ]);
 
       if (!ovRes.ok) throw new Error("Failed to load analytics overview");
@@ -72,7 +73,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ apiBase = "", onOp
 
   const handleSaveGoal = async (goalType: GoalType, target: number) => {
     if (!token) return;
-    const res = await fetch(`${apiBase}/api/v1/goals`, {
+    const res = await apiFetch(`${apiBase}/api/v1/goals`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
@@ -86,7 +87,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ apiBase = "", onOp
 
   const handleDeleteGoal = async (goalId: string) => {
     if (!token) return;
-    await fetch(`${apiBase}/api/v1/goals/${goalId}`, {
+    await apiFetch(`${apiBase}/api/v1/goals/${goalId}`, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${token}` },
     });

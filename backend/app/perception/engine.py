@@ -52,6 +52,10 @@ class PerceptionEngine:
         self._latest_face_geom: Optional[FaceGeometry] = None
         self._latest_posture_res: Optional[Any] = None
         self._latest_alertness_res: Optional[Any] = None
+        self._worker_thread: Optional[threading.Thread] = None
+        self._worker_running: bool = False
+        self._worker_frames_processed: int = 0
+        self._last_processed_frame_id: int = -1
         self._lock = threading.Lock()
 
     @property
@@ -78,6 +82,45 @@ class PerceptionEngine:
     def intervention_engine(self) -> InterventionEngine:
         return self._intervention_engine
 
+    def start_worker(self, manager: Any) -> None:
+        """Start dedicated background perception worker thread consuming newest frames."""
+        with self._lock:
+            if self._worker_running:
+                return
+            self._worker_running = True
+            self._worker_thread = threading.Thread(
+                target=self._worker_loop,
+                args=(manager,),
+                daemon=True,
+                name="PerceptionWorkerThread",
+            )
+            self._worker_thread.start()
+
+    def stop_worker(self) -> None:
+        """Stop dedicated background perception worker thread."""
+        self._worker_running = False
+        if self._worker_thread is not None:
+            try:
+                self._worker_thread.join(timeout=2.0)
+            except Exception:
+                pass
+            self._worker_thread = None
+
+    def _worker_loop(self, manager: Any) -> None:
+        """Worker loop continuously consuming newest raw frame without blocking capture."""
+        import time
+        while self._worker_running:
+            try:
+                if hasattr(manager, "get_latest_raw_frame"):
+                    frame_id, raw_frame = manager.get_latest_raw_frame()
+                    if raw_frame is not None and frame_id > self._last_processed_frame_id:
+                        self._last_processed_frame_id = frame_id
+                        self.process_frame(raw_frame)
+                        self._worker_frames_processed += 1
+                time.sleep(0.005)
+            except Exception:
+                time.sleep(0.02)
+
     def reset_session(self) -> None:
         """Reset transient temporal accumulators on monitoring start."""
         with self._lock:
@@ -103,10 +146,10 @@ class PerceptionEngine:
             self._latest_posture_res = None
             self._latest_alertness_res = None
 
-    def process_frame(self, frame_bytes: Optional[bytes]) -> HumanState:
+    def process_frame(self, frame_input: Optional[Union[bytes, np.ndarray]]) -> HumanState:
         """Process a single frame buffer into an updated HumanState."""
         with self._lock:
-            if frame_bytes is None:
+            if frame_input is None:
                 state = HumanState(
                     timestamp=datetime.now(timezone.utc),
                     track_id="visionguard-001",
@@ -131,11 +174,15 @@ class PerceptionEngine:
                 self._latest_state = state
                 return state
 
-            # Decode JPEG bytes to BGR image
-            try:
-                nparr = np.frombuffer(frame_bytes, np.uint8)
-                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            except Exception:
+            if isinstance(frame_input, np.ndarray):
+                frame = frame_input
+            elif isinstance(frame_input, (bytes, bytearray)):
+                try:
+                    nparr = np.frombuffer(frame_input, np.uint8)
+                    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                except Exception:
+                    frame = None
+            else:
                 frame = None
 
             if frame is None:
@@ -289,7 +336,7 @@ class PerceptionEngine:
             session_service.on_frame_processed(state)
             return state
 
-    def get_annotated_frame_bytes(self, mode: str = "MINIMAL") -> Optional[bytes]:
+    def get_annotated_frame_bytes(self, mode: str = "MINIMAL", current_frame: Optional[np.ndarray] = None) -> Optional[bytes]:
         """Render landmark skeleton and telemetry overlay onto latest frame.
 
         Does NOT open a second camera or run inference twice.
@@ -297,16 +344,17 @@ class PerceptionEngine:
         Returns transient JPEG bytes in-memory.
         """
         with self._lock:
-            if self._latest_raw_frame is None:
+            target_frame = current_frame if current_frame is not None else self._latest_raw_frame
+            if target_frame is None:
                 return None
 
             normalized_mode = mode.upper() if mode else "MINIMAL"
             if normalized_mode == "OFF":
-                success, buf = cv2.imencode(".jpg", self._latest_raw_frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                success, buf = cv2.imencode(".jpg", target_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
                 return buf.tobytes() if success else None
 
             annotated = self._overlay_renderer.render(
-                frame=self._latest_raw_frame,
+                frame=target_frame,
                 mode=normalized_mode,
                 pose_data=self._latest_pose_result,
                 face_data=self._latest_face_result,

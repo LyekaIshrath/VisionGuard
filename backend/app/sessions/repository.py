@@ -20,7 +20,7 @@ ALLOWED_RISK_EVENT_FIELDS = {
 ALLOWED_USER_PREFERENCE_FIELDS = {
     "user_id", "browser_notifications_enabled", "data_retention_days",
     "voice_alerts_enabled", "voice_volume", "voice_rate", "voice_pitch",
-    "quiet_mode_enabled", "selected_voice", "timezone"
+    "quiet_mode_enabled", "selected_voice", "timezone", "alert_language"
 }
 
 ALLOWED_PERSONAL_GOAL_FIELDS = {
@@ -148,6 +148,7 @@ class SupabaseSessionRepository:
             "quiet_mode_enabled": False,
             "selected_voice": None,
             "data_retention_days": None,
+            "alert_language": "en",
         }
         if not self.base_url:
             return defaults

@@ -334,7 +334,7 @@ class OverlayRenderer:
         ear_th_str = f"{ear_thresh:.3f}" if ear_thresh is not None else "-"
         mor_str = f"{mor_val:.3f}" if mor_val is not None else "-"
         mor_th_str = f"{mor_thresh:.2f}" if mor_thresh is not None else "-"
-        closure_str = f"{closure:.2f}s"
+        closure_str = f"{closure:.2f}s" if isinstance(closure, (int, float)) else "-"
         p_sc_str = f"{p_score:.1f}" if isinstance(p_score, (int, float)) else "-"
         a_sc_str = f"{a_score:.1f}" if isinstance(a_score, (int, float)) else "-"
         r_sc_str = f"{risk_sc:.1f}" if isinstance(risk_sc, (int, float)) else "-"

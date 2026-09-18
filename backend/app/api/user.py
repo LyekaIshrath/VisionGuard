@@ -20,6 +20,7 @@ class UserPreferencesUpdate(BaseModel):
     selected_voice: Optional[str] = None
     data_retention_days: Optional[int] = Field(default=None, ge=1)
     timezone: Optional[str] = None
+    alert_language: Optional[str] = Field(default=None, pattern="^(en|ta|en\\+ta)$")
 
 
 class AcknowledgeAlertRequest(BaseModel):

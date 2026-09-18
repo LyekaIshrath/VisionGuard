@@ -32,14 +32,40 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       if (isSignUp) {
         const { error } = await signUp(email, password);
         if (error) {
-          setErrorMsg(error.message);
+          const errStatus = (error as any).status;
+          const errCode = (error as any).code || "";
+          const msg = (error.message || "").toLowerCase();
+          if (
+            errStatus === 429 ||
+            errCode === "over_email_send_rate_limit" ||
+            msg.includes("over_email_send_rate_limit") ||
+            msg.includes("rate limit") ||
+            msg.includes("too many requests")
+          ) {
+            setErrorMsg("Too many verification emails were requested. Please wait a little before trying again.");
+          } else {
+            setErrorMsg(error.message);
+          }
         } else {
           setSuccessMsg("Account created! Check your email for confirmation or sign in.");
         }
       } else {
         const { error } = await signIn(email, password);
         if (error) {
-          setErrorMsg(error.message);
+          const errStatus = (error as any).status;
+          const errCode = (error as any).code || "";
+          const msg = (error.message || "").toLowerCase();
+          if (
+            errStatus === 429 ||
+            errCode === "over_email_send_rate_limit" ||
+            msg.includes("over_email_send_rate_limit") ||
+            msg.includes("rate limit") ||
+            msg.includes("too many requests")
+          ) {
+            setErrorMsg("Too many verification emails were requested. Please wait a little before trying again.");
+          } else {
+            setErrorMsg(error.message);
+          }
         } else {
           onClose();
         }

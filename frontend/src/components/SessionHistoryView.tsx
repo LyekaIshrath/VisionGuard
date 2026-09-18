@@ -1,3 +1,4 @@
+import { apiFetch } from "../services/apiClient";
 ﻿import React, { useEffect, useState } from "react";
 import { SessionRecord } from "../types";
 import { useAuth } from "../contexts/AuthContext";
@@ -23,7 +24,7 @@ export const SessionHistoryView: React.FC<SessionHistoryViewProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const resp = await fetch(`${apiBase}/api/v1/sessions?limit=50`, {
+      const resp = await apiFetch(`${apiBase}/api/v1/sessions?limit=50`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -52,7 +53,7 @@ export const SessionHistoryView: React.FC<SessionHistoryViewProps> = ({
     if (!token || !window.confirm("Are you sure you want to delete this session?")) return;
 
     try {
-      const resp = await fetch(`${apiBase}/api/v1/sessions/${sessionId}`, {
+      const resp = await apiFetch(`${apiBase}/api/v1/sessions/${sessionId}`, {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${token}`,

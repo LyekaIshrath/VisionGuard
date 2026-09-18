@@ -16,7 +16,15 @@ function pwaPrecachePlugin(): Plugin {
         "/favicon.svg",
         "/icons/icon-192.png",
         "/icons/icon-512.png",
-        "/icons/icon-maskable-512.png"
+        "/icons/icon-maskable-512.png",
+        "/audio/alerts/en/posture_moderate.mp3",
+        "/audio/alerts/en/posture_high.mp3",
+        "/audio/alerts/en/alertness_moderate.mp3",
+        "/audio/alerts/en/alertness_high.mp3",
+        "/audio/alerts/ta/posture_moderate.mp3",
+        "/audio/alerts/ta/posture_high.mp3",
+        "/audio/alerts/ta/alertness_moderate.mp3",
+        "/audio/alerts/ta/alertness_high.mp3"
       ];
 
       for (const fileName of Object.keys(bundle)) {
@@ -83,7 +91,7 @@ self.addEventListener("fetch", (event) => {
           response &&
           response.status === 200 &&
           url.origin === self.location.origin &&
-          url.pathname.startsWith("/assets/")
+          (url.pathname.startsWith("/assets/") || url.pathname.startsWith("/audio/"))
         ) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));

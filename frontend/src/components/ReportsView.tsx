@@ -1,3 +1,4 @@
+import { apiFetch } from "../services/apiClient";
 import React, { useEffect, useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { WeeklyReport } from "../types";
@@ -21,7 +22,7 @@ export const ReportsView: React.FC = () => {
     setError(null);
     try {
       const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/reports/weekly?week_offset=${weekOffset}&tz=${encodeURIComponent(browserTz)}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -44,7 +45,7 @@ export const ReportsView: React.FC = () => {
     setDownloading(type);
     try {
       const url = `/api/v1/reports/export/${type}/csv?days=30`;
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error("Export failed");

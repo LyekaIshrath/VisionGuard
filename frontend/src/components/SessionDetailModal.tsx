@@ -1,3 +1,4 @@
+import { apiFetch } from "../services/apiClient";
 ﻿import React, { useEffect, useState } from "react";
 import { SessionRecord, RiskEventRecord } from "../types";
 import { useAuth } from "../contexts/AuthContext";
@@ -25,7 +26,7 @@ export const SessionDetailModal: React.FC<SessionDetailModalProps> = ({
       setLoading(true);
       setError(null);
       try {
-        const resp = await fetch(`${apiBase}/api/v1/sessions/${session.id}/events`, {
+        const resp = await apiFetch(`${apiBase}/api/v1/sessions/${session.id}/events`, {
           headers: {
             Authorization: `Bearer ${token}`,
           },
