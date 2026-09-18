@@ -1,19 +1,30 @@
-﻿from typing import Dict, Any, List
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import datetime, timezone, timedelta
+from typing import Dict, Any, List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+
 from app.auth.models import AuthenticatedUser
 from app.auth.dependencies import get_current_user
 from app.sessions.service import session_service
 from app.sessions.models import AnalyticsSummary
+from app.intelligence.models import (
+    AnalyticsOverview, DailyTrendItem, TimeOfDayBucket, Insight
+)
+from app.intelligence.analytics_engine import (
+    resolve_user_timezone, compute_analytics_overview,
+    compute_daily_trends, compute_time_of_day_patterns
+)
+from app.intelligence.insight_engine import DeterministicInsightEngine
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
+
 
 @router.get("/summary", response_model=AnalyticsSummary)
 async def get_analytics_summary(
     user: AuthenticatedUser = Depends(get_current_user)
 ):
     """
+    Legacy Mission 06 summary preserved for backward compatibility.
     Computes aggregate analytics for the authenticated user from their sessions.
-    Guarantees user isolation through RLS token forwarding.
     """
     try:
         sessions = await session_service.repository.list_sessions(
@@ -33,7 +44,6 @@ async def get_analytics_summary(
             if total_seconds > 0 else 0.0
         )
 
-        # Time-weighted average across sessions
         posture_weighted_sum = 0.0
         posture_time_sum = 0.0
         alertness_weighted_sum = 0.0
@@ -69,4 +79,106 @@ async def get_analytics_summary(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Failed to generate analytics summary: {str(e)}"
+        )
+
+
+async def _fetch_user_context(user: AuthenticatedUser, days: int, browser_tz: Optional[str]):
+    prefs = await session_service.repository.get_user_preferences(user.id, user.token)
+    saved_tz = prefs.get("timezone") if prefs else None
+    resolved_tz = resolve_user_timezone(saved_tz, browser_tz)
+
+    now_utc = datetime.now(timezone.utc)
+    start_utc = now_utc - timedelta(days=days)
+    start_iso = start_utc.isoformat()
+
+    sessions = await session_service.repository.list_sessions_in_range(
+        token=user.token, start_time=start_iso, limit=1000
+    )
+    session_ids = [s["id"] for s in sessions if "id" in s]
+    events = await session_service.repository.list_events_in_range(
+        token=user.token, start_time=start_iso, session_ids=session_ids, limit=5000
+    )
+    return resolved_tz, sessions, events, now_utc
+
+
+@router.get("/overview", response_model=AnalyticsOverview)
+async def get_analytics_overview(
+    days: int = Query(default=30, ge=1, le=365),
+    tz: Optional[str] = Query(default=None),
+    user: AuthenticatedUser = Depends(get_current_user)
+):
+    try:
+        resolved_tz, sessions, events, _ = await _fetch_user_context(user, days, tz)
+        return compute_analytics_overview(sessions, events)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to compute analytics overview: {str(e)}"
+        )
+
+
+@router.get("/trends", response_model=List[DailyTrendItem])
+async def get_daily_trends(
+    days: int = Query(default=14, ge=1, le=90),
+    tz: Optional[str] = Query(default=None),
+    user: AuthenticatedUser = Depends(get_current_user)
+):
+    try:
+        resolved_tz, sessions, events, now_utc = await _fetch_user_context(user, days, tz)
+        now_local = now_utc.astimezone(resolved_tz)
+        end_date = now_local.date()
+        start_date = end_date - timedelta(days=days - 1)
+        return compute_daily_trends(sessions, events, resolved_tz, start_date, end_date)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to compute daily trends: {str(e)}"
+        )
+
+
+@router.get("/patterns", response_model=List[TimeOfDayBucket])
+async def get_time_of_day_patterns(
+    days: int = Query(default=30, ge=1, le=365),
+    tz: Optional[str] = Query(default=None),
+    user: AuthenticatedUser = Depends(get_current_user)
+):
+    try:
+        resolved_tz, sessions, events, _ = await _fetch_user_context(user, days, tz)
+        return compute_time_of_day_patterns(sessions, events, resolved_tz)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to compute time of day patterns: {str(e)}"
+        )
+
+
+@router.get("/insights", response_model=List[Insight])
+async def get_insights(
+    days: int = Query(default=30, ge=1, le=365),
+    tz: Optional[str] = Query(default=None),
+    user: AuthenticatedUser = Depends(get_current_user)
+):
+    try:
+        resolved_tz, sessions, events, now_utc = await _fetch_user_context(user, days, tz)
+        now_local = now_utc.astimezone(resolved_tz)
+        end_date = now_local.date()
+        start_date = end_date - timedelta(days=days - 1)
+
+        overview = compute_analytics_overview(sessions, events)
+        trends = compute_daily_trends(sessions, events, resolved_tz, start_date, end_date)
+        tod = compute_time_of_day_patterns(sessions, events, resolved_tz)
+
+        return DeterministicInsightEngine.generate_insights(overview, trends, tod)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to generate insights: {str(e)}"
         )

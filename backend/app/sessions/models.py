@@ -15,6 +15,8 @@ class SessionUpdate(BaseModel):
     average_alertness_score: Optional[float] = None
     risk_event_count: Optional[int] = None
     intervention_count: Optional[int] = None
+    valid_posture_seconds: Optional[float] = None
+    valid_alertness_seconds: Optional[float] = None
     status: Optional[str] = "COMPLETED"
 
 class SessionRecord(BaseModel):
@@ -30,6 +32,8 @@ class SessionRecord(BaseModel):
     average_alertness_score: Optional[float] = None
     risk_event_count: int = 0
     intervention_count: int = 0
+    valid_posture_seconds: Optional[float] = None
+    valid_alertness_seconds: Optional[float] = None
     status: str = "ACTIVE"
     device_name: Optional[str] = "VisionGuard Desktop"
 

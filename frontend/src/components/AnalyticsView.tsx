@@ -1,147 +1,258 @@
-﻿import React, { useEffect, useState } from "react";
-import { AnalyticsSummary } from "../types";
+import React, { useEffect, useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import {
+  AnalyticsOverview,
+  DailyTrendItem,
+  TimeOfDayBucket,
+  Insight,
+  PersonalGoal,
+  GoalType
+} from "../types";
+import { TrendLineChart } from "./TrendLineChart";
+import { TimeOfDayChart } from "./TimeOfDayChart";
+import { InsightsCard } from "./InsightsCard";
+import { PersonalGoalsCard } from "./PersonalGoalsCard";
 
 interface AnalyticsViewProps {
-  apiBase: string;
-  onOpenAuth: () => void;
+  apiBase?: string;
+  onOpenAuth?: () => void;
 }
 
-export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
-  apiBase,
-  onOpenAuth,
-}) => {
-  const { user, token } = useAuth();
-  const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
+export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ apiBase = "", onOpenAuth }) => {
+  const { session } = useAuth();
+  const token = session?.access_token;
+
+  const [days, setDays] = useState<number>(14);
+  const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!token) return;
+  const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
+  const [trends, setTrends] = useState<DailyTrendItem[]>([]);
+  const [timeOfDay, setTimeOfDay] = useState<TimeOfDayBucket[]>([]);
+  const [insights, setInsights] = useState<Insight[]>([]);
+  const [goals, setGoals] = useState<PersonalGoal[]>([]);
 
-    const fetchAnalytics = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const resp = await fetch(`${apiBase}/api/v1/analytics/summary`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        if (resp.ok) {
-          const data: AnalyticsSummary = await resp.json();
-          setSummary(data);
-        } else {
-          setError("Failed to load analytics from cloud.");
-        }
-      } catch (err: any) {
-        setError(err.message || "Network error loading analytics.");
-      } finally {
-        setLoading(false);
-      }
-    };
+  const fetchAnalytics = async () => {
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const headers = { Authorization: `Bearer ${token}` };
 
-    fetchAnalytics();
-  }, [token, apiBase]);
+      const [ovRes, trRes, todRes, inRes, gRes] = await Promise.all([
+        fetch(`${apiBase}/api/v1/analytics/overview?days=${days}&tz=${encodeURIComponent(browserTz)}`, { headers }),
+        fetch(`${apiBase}/api/v1/analytics/trends?days=${days}&tz=${encodeURIComponent(browserTz)}`, { headers }),
+        fetch(`${apiBase}/api/v1/analytics/patterns?days=${days}&tz=${encodeURIComponent(browserTz)}`, { headers }),
+        fetch(`${apiBase}/api/v1/analytics/insights?days=${days}&tz=${encodeURIComponent(browserTz)}`, { headers }),
+        fetch(`${apiBase}/api/v1/goals?tz=${encodeURIComponent(browserTz)}`, { headers }),
+      ]);
 
-  const formatHours = (seconds: number) => {
-    const hours = (seconds / 3600).toFixed(1);
-    return `${hours} hrs`;
+      if (!ovRes.ok) throw new Error("Failed to load analytics overview");
+      const ovData = await ovRes.json();
+      setOverview(ovData);
+
+      if (trRes.ok) setTrends(await trRes.json());
+      if (todRes.ok) setTimeOfDay(await todRes.json());
+      if (inRes.ok) setInsights(await inRes.json());
+      if (gRes.ok) setGoals(await gRes.json());
+    } catch (err: any) {
+      setError(err.message || "Failed to load personal intelligence");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  if (!user || !token) {
+  useEffect(() => {
+    fetchAnalytics();
+  }, [token, days, apiBase]);
+
+  const handleSaveGoal = async (goalType: GoalType, target: number) => {
+    if (!token) return;
+    const res = await fetch(`${apiBase}/api/v1/goals`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ goal_type: goalType, target_value: target }),
+    });
+    if (!res.ok) throw new Error("Failed to update goal");
+    await fetchAnalytics();
+  };
+
+  const handleDeleteGoal = async (goalId: string) => {
+    if (!token) return;
+    await fetch(`${apiBase}/api/v1/goals/${goalId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    await fetchAnalytics();
+  };
+
+  if (!token) {
     return (
-      <div className="empty-history-view">
-        <div className="empty-card">
-          <div className="empty-icon">
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <path d="M18 20V10" />
-              <path d="M12 20V4" />
-              <path d="M6 20v-6" />
-            </svg>
-          </div>
-          <h2 className="empty-title">Sign in to View Ergonomic Analytics</h2>
-          <p className="empty-subtitle">
-            Historical analytics aggregate your posture adherence and alertness trends over time.
-            Sign in with your VisionGuard account to access your personal wellness analytics.
-          </p>
-          <button className="btn btn-primary" onClick={onOpenAuth}>
-            Sign In / Register
-          </button>
+      <div className="analytics-container not-logged-in">
+        <div className="empty-cloud-prompt">
+          <h3>Cloud Authentication Required</h3>
+          <p>Sign in to sync your sessions and access personal ergonomic intelligence and trends.</p>
+          {onOpenAuth && (
+            <button className="auth-btn-prompt" onClick={onOpenAuth}>
+              Sign In to Cloud
+            </button>
+          )}
         </div>
       </div>
     );
   }
 
+  if (loading && !overview) {
+    return (
+      <div className="analytics-loading">
+        <div className="spinner"></div>
+        <p>Computing personal ergonomics intelligence...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="analytics-error">
+        <p>{error}</p>
+        <button className="retry-btn" onClick={fetchAnalytics}>
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  const monitoredHours = overview ? (overview.total_monitored_seconds / 3600).toFixed(1) : "0.0";
+  const pQuality = overview?.coverage.posture.data_quality;
+  const aQuality = overview?.coverage.alertness.data_quality;
+
   return (
-    <div className="analytics-container">
-      <div className="view-header">
+    <div className="personal-intelligence-view">
+      {/* Top Header */}
+      <div className="view-header-row">
         <div>
-          <h2 className="view-title">Ergonomic &amp; Wellness Analytics</h2>
-          <p className="view-subtitle">Aggregated trends and time-weighted metrics across your sessions</p>
+          <h2 className="view-title">Personal Intelligence & Analytics</h2>
+          <p className="view-subtitle">
+            Long-term ergonomic trends, valid-observation rates, and deterministic wellness insights
+          </p>
+        </div>
+
+        {/* Days range selector */}
+        <div className="range-selector">
+          {[7, 14, 30].map((d) => (
+            <button
+              key={d}
+              className={`range-btn ${days === d ? "active" : ""}`}
+              onClick={() => setDays(d)}
+            >
+              {d} Days
+            </button>
+          ))}
         </div>
       </div>
 
-      {error && <div className="auth-alert error">{error}</div>}
-
-      {loading ? (
-        <div className="loading-state">Aggregating historical analytics...</div>
-      ) : !summary || summary.total_sessions === 0 ? (
-        <div className="empty-card">
-          <p className="empty-subtitle">No historical session data available yet. Complete monitoring sessions to see trends!</p>
+      {/* Coverage Status Bar */}
+      {overview && (
+        <div className="coverage-status-banner">
+          <span className="coverage-label">Data Telemetry Quality:</span>
+          <span className={`quality-badge ${pQuality?.toLowerCase()}`}>
+            Posture: {pQuality} ({overview.coverage.posture.sessions_with_known_exposure}/{overview.coverage.sessions_total} sessions)
+          </span>
+          <span className={`quality-badge ${aQuality?.toLowerCase()}`}>
+            Alertness: {aQuality} ({overview.coverage.alertness.sessions_with_known_exposure}/{overview.coverage.sessions_total} sessions)
+          </span>
+          {pQuality === "PARTIAL" && (
+            <span className="coverage-notice-text">
+              ℹ️ Rates strictly exclude sessions where observation duration was unrecorded.
+            </span>
+          )}
         </div>
-      ) : (
-        <div className="analytics-grid">
-          <div className="analytics-card highlight">
-            <div className="analytics-card-header">
-              <span className="card-label">Total Monitored Time</span>
-              <span className="card-badge">{summary.total_sessions} Sessions</span>
+      )}
+
+      {/* Overview Stat Cards */}
+      {overview && (
+        <div className="overview-stats-grid">
+          <div className="stat-card">
+            <span className="stat-label">Total Monitored</span>
+            <div className="stat-val-group">
+              <span className="stat-value">{monitoredHours}</span>
+              <span className="stat-unit">hours</span>
             </div>
-            <div className="card-big-value">{formatHours(summary.total_monitored_seconds)}</div>
-            <p className="card-subtext">Active monitoring with local edge intelligence</p>
+            <span className="stat-hint">{overview.total_sessions} total sessions</span>
           </div>
 
-          <div className="analytics-card">
-            <div className="analytics-card-header">
-              <span className="card-label">Good Posture Adherence</span>
+          <div className="stat-card">
+            <span className="stat-label">Good Posture Ratio</span>
+            <div className="stat-val-group">
+              <span className="stat-value">
+                {overview.good_posture_percentage !== null ? `${overview.good_posture_percentage}%` : "--"}
+              </span>
             </div>
-            <div className="card-big-value text-accent">{summary.good_posture_percentage}%</div>
-            <p className="card-subtext">{formatHours(summary.total_good_posture_seconds)} in optimal posture</p>
+            <span className="stat-hint">of verified observation exposure</span>
           </div>
 
-          <div className="analytics-card">
-            <div className="analytics-card-header">
-              <span className="card-label">Average Posture Score</span>
+          <div className="stat-card">
+            <span className="stat-label">Posture Risk Rate</span>
+            <div className="stat-val-group">
+              <span className="stat-value">
+                {overview.posture_events_per_valid_observation_hour !== null
+                  ? overview.posture_events_per_valid_observation_hour
+                  : "--"}
+              </span>
+              <span className="stat-unit">events / hr</span>
             </div>
-            <div className="card-big-value">{summary.average_posture_score ?? "—"}</div>
-            <p className="card-subtext">Time-weighted average score (0–100)</p>
+            <span className="stat-hint">matched cohort rate</span>
           </div>
 
-          <div className="analytics-card">
-            <div className="analytics-card-header">
-              <span className="card-label">Average Alertness Score</span>
+          <div className="stat-card">
+            <span className="stat-label">Alertness Risk Rate</span>
+            <div className="stat-val-group">
+              <span className="stat-value">
+                {overview.alertness_events_per_valid_observation_hour !== null
+                  ? overview.alertness_events_per_valid_observation_hour
+                  : "--"}
+              </span>
+              <span className="stat-unit">events / hr</span>
             </div>
-            <div className="card-big-value">{summary.average_alertness_score ?? "—"}</div>
-            <p className="card-subtext">Time-weighted alertness metric</p>
-          </div>
-
-          <div className="analytics-card">
-            <div className="analytics-card-header">
-              <span className="card-label">Total Risk Events</span>
-            </div>
-            <div className="card-big-value text-warning">{summary.total_risk_events}</div>
-            <p className="card-subtext">Temporal posture &amp; drowsiness alerts detected</p>
-          </div>
-
-          <div className="analytics-card">
-            <div className="analytics-card-header">
-              <span className="card-label">Calm Interventions</span>
-            </div>
-            <div className="card-big-value">{summary.total_interventions}</div>
-            <p className="card-subtext">Actionable reminders presented to keep you safe</p>
+            <span className="stat-hint">matched cohort rate</span>
           </div>
         </div>
       )}
+
+      {/* Deterministic Insights */}
+      {insights.length > 0 && <InsightsCard insights={insights} />}
+
+      {/* Daily Trends Chart */}
+      <div className="chart-section-card">
+        <div className="chart-header">
+          <h3 className="section-title">Daily Ergonomic Trends</h3>
+          <span className="section-subtitle">Good posture adherence and risk event frequency over the last {days} days</span>
+        </div>
+        <TrendLineChart data={trends} />
+      </div>
+
+      {/* Time of Day Distribution */}
+      <div className="chart-section-card">
+        <div className="chart-header">
+          <h3 className="section-title">Time of Day Vulnerability Patterns</h3>
+          <span className="section-subtitle">Active monitored exposure hours and risk frequency across morning, afternoon, evening, and night</span>
+        </div>
+        <TimeOfDayChart data={timeOfDay} />
+      </div>
+
+      {/* Personal Goals */}
+      <PersonalGoalsCard
+        goals={goals}
+        onSaveGoal={handleSaveGoal}
+        onDeleteGoal={handleDeleteGoal}
+      />
     </div>
   );
 };

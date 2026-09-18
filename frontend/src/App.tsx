@@ -27,6 +27,7 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { AuthModal } from "./components/AuthModal";
 import { SessionHistoryView } from "./components/SessionHistoryView";
 import { AnalyticsView } from "./components/AnalyticsView";
+import { ReportsView } from "./components/ReportsView";
 import { PrivacyView } from "./components/PrivacyView";
 import { SettingsView } from "./components/SettingsView";
 import { AlertProvider, useAlerts } from "./contexts/AlertContext";
@@ -508,6 +509,8 @@ function DashboardInner() {
               apiBase={getApiBase()}
               onOpenAuth={() => setAuthModalOpen(true)}
             />
+          ) : activeSection === "reports-section" ? (
+            <ReportsView />
           ) : activeSection === "privacy-section" ? (
             <PrivacyView
               apiBase={getApiBase()}

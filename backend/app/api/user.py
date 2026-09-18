@@ -19,6 +19,7 @@ class UserPreferencesUpdate(BaseModel):
     quiet_mode_enabled: Optional[bool] = None
     selected_voice: Optional[str] = None
     data_retention_days: Optional[int] = Field(default=None, ge=1)
+    timezone: Optional[str] = None
 
 
 class AcknowledgeAlertRequest(BaseModel):
@@ -49,11 +50,23 @@ async def update_preferences(
 ):
     """Updates the authenticated user's preferences with strict validation."""
     try:
+        if payload.timezone is not None:
+            from zoneinfo import ZoneInfo
+            try:
+                ZoneInfo(payload.timezone)
+            except Exception:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid IANA timezone '{payload.timezone}'"
+                )
+
         data = {k: v for k, v in payload.model_dump().items() if v is not None}
         updated = await session_service.repository.upsert_user_preferences(
             user_id=user.id, token=user.token, payload=data
         )
         return updated
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

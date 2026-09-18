@@ -55,6 +55,18 @@ export const SettingsView: React.FC = () => {
 
             <div className="setting-item">
               <div className="setting-info">
+                <span className="setting-label">Ergonomic Timezone</span>
+                <span className="setting-desc">
+                  Used to split daily metrics and time-of-day exposure. Defaults to your browser detection when unsaved.
+                </span>
+              </div>
+              <div className="tz-select-group">
+                <span className="badge badge-secondary">{Intl.DateTimeFormat().resolvedOptions().timeZone}</span>
+              </div>
+            </div>
+
+            <div className="setting-item">
+              <div className="setting-info">
                 <span className="setting-label">Quiet Mode</span>
                 <span className="setting-desc">
                   Suppresses all spoken alerts and desktop notifications while continuing active monitoring and in-app indicators.

@@ -270,6 +270,8 @@ class SessionService:
                 "average_alertness_score": summary["average_alertness_score"],
                 "risk_event_count": summary["risk_event_count"],
                 "intervention_count": summary["intervention_count"],
+                "valid_posture_seconds": summary.get("valid_posture_seconds"),
+                "valid_alertness_seconds": summary.get("valid_alertness_seconds"),
                 "status": "COMPLETED"
             }
             await self.repository.update_session(session_id=session_id, token=token, payload=payload)

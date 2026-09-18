@@ -37,6 +37,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   voice_pitch: 1.0,
   quiet_mode_enabled: false,
   selected_voice: null,
+  timezone: null,
 };
 
 const AlertContext = createContext<AlertContextValue | null>(null);

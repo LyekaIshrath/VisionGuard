@@ -87,6 +87,8 @@ class SessionAggregator:
             "alertness_risk_seconds": round(self.alertness_risk_seconds, 1),
             "average_posture_score": avg_posture,
             "average_alertness_score": avg_alertness,
+            "valid_posture_seconds": round(self.posture_valid_seconds, 1),
+            "valid_alertness_seconds": round(self.alertness_valid_seconds, 1),
             "risk_event_count": self.risk_event_count,
             "intervention_count": self.intervention_count
         }

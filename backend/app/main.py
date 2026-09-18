@@ -11,6 +11,8 @@ from app.api.sessions import router as sessions_router
 from app.api.analytics import router as analytics_router
 from app.api.user import router as user_router
 from app.api.cloud import router as cloud_router
+from app.api.goals import router as goals_router
+from app.api.reports import router as reports_router
 
 app = FastAPI(
     title=app_name,
@@ -34,6 +36,8 @@ app.include_router(sessions_router, prefix="/api/v1")
 app.include_router(analytics_router, prefix="/api/v1")
 app.include_router(user_router, prefix="/api/v1")
 app.include_router(cloud_router, prefix="/api/v1")
+app.include_router(goals_router, prefix="/api/v1")
+app.include_router(reports_router, prefix="/api/v1")
 
 
 @app.get("/health")

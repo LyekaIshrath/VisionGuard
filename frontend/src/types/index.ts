@@ -198,4 +198,112 @@ export interface UserPreferences {
   quiet_mode_enabled: boolean;
   selected_voice: string | null;
   data_retention_days?: number;
+  timezone?: string | null;
+}
+
+// ==========================================
+// MISSION 08 — PERSONAL INTELLIGENCE & REPORTS
+// ==========================================
+
+export type CoverageLevel = "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
+
+export interface ModalityCoverage {
+  data_quality: CoverageLevel;
+  sessions_with_known_exposure: number;
+}
+
+export interface CohortCoverage {
+  sessions_total: number;
+  posture: ModalityCoverage;
+  alertness: ModalityCoverage;
+}
+
+export interface AnalyticsOverview {
+  total_monitored_seconds: number;
+  total_sessions: number;
+  good_posture_seconds: number | null;
+  good_posture_percentage: number | null;
+  posture_risk_seconds: number | null;
+  alertness_risk_seconds: number | null;
+  posture_events_per_valid_observation_hour: number | null;
+  alertness_events_per_valid_observation_hour: number | null;
+  average_posture_score: number | null;
+  average_alertness_score: number | null;
+  total_risk_events: number;
+  total_interventions: number;
+  coverage: CohortCoverage;
+}
+
+export interface DailyTrendItem {
+  date: string; // YYYY-MM-DD
+  total_monitored_seconds: number;
+  good_posture_seconds: number;
+  valid_posture_seconds: number | null;
+  good_posture_percentage: number | null;
+  posture_events_per_valid_observation_hour: number | null;
+  alertness_events_per_valid_observation_hour: number | null;
+  average_posture_score: number | null;
+  average_alertness_score: number | null;
+  risk_event_count: number;
+  intervention_count: number;
+  coverage: CohortCoverage;
+}
+
+export interface TimeOfDayBucket {
+  bucket: "MORNING" | "AFTERNOON" | "EVENING" | "NIGHT";
+  label: string;
+  monitored_exposure_seconds: number;
+  risk_event_count: number;
+  events_per_monitored_hour: number | null;
+}
+
+export type InsightType =
+  | "POSITIVE_PATTERN"
+  | "ATTENTION_PATTERN"
+  | "INFORMATIONAL"
+  | "INSUFFICIENT_DATA";
+
+export interface Insight {
+  id: string;
+  type: InsightType;
+  title: string;
+  description: string;
+  metric_reference?: string | null;
+  recommended_action?: string | null;
+}
+
+export type GoalType =
+  | "DAILY_MONITORING_MINUTES"
+  | "GOOD_POSTURE_PERCENTAGE"
+  | "MAX_POSTURE_RISK_EVENTS_PER_HOUR";
+
+export interface PersonalGoal {
+  id?: string;
+  user_id?: string;
+  goal_type: GoalType;
+  target_value: number;
+  created_at?: string;
+  updated_at?: string;
+  current_value?: number | null;
+  progress_percentage?: number | null;
+  achieved?: boolean | null;
+}
+
+export interface WeeklyReport {
+  week_start: string;
+  week_end: string;
+  timezone: string;
+  overview: AnalyticsOverview;
+  daily_trends: DailyTrendItem[];
+  time_of_day_patterns: TimeOfDayBucket[];
+  insights: Insight[];
+}
+
+export interface SessionReport {
+  session: SessionRecord;
+  coverage: CohortCoverage;
+  overview: AnalyticsOverview;
+  event_breakdown: Record<string, number>;
+  severity_breakdown: Record<string, number>;
+  events: RiskEventRecord[];
 }

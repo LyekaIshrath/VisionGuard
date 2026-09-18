@@ -8,7 +8,8 @@ ALLOWED_SESSION_FIELDS = {
     "id", "user_id", "started_at", "ended_at", "duration_seconds",
     "good_posture_seconds", "posture_risk_seconds", "alertness_risk_seconds",
     "average_posture_score", "average_alertness_score", "risk_event_count",
-    "intervention_count", "status", "device_name"
+    "intervention_count", "valid_posture_seconds", "valid_alertness_seconds",
+    "status", "device_name"
 }
 
 ALLOWED_RISK_EVENT_FIELDS = {
@@ -19,7 +20,11 @@ ALLOWED_RISK_EVENT_FIELDS = {
 ALLOWED_USER_PREFERENCE_FIELDS = {
     "user_id", "browser_notifications_enabled", "data_retention_days",
     "voice_alerts_enabled", "voice_volume", "voice_rate", "voice_pitch",
-    "quiet_mode_enabled", "selected_voice"
+    "quiet_mode_enabled", "selected_voice", "timezone"
+}
+
+ALLOWED_PERSONAL_GOAL_FIELDS = {
+    "id", "user_id", "goal_type", "target_value", "created_at", "updated_at"
 }
 
 
@@ -60,6 +65,9 @@ class SupabaseSessionRepository:
 
     def filter_preference_payload(self, data: Dict[str, Any]) -> Dict[str, Any]:
         return {k: v for k, v in data.items() if k in ALLOWED_USER_PREFERENCE_FIELDS}
+
+    def filter_goal_payload(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        return {k: v for k, v in data.items() if k in ALLOWED_PERSONAL_GOAL_FIELDS}
 
     async def create_session(self, token: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         clean_data = self.filter_session_payload(payload)
@@ -186,6 +194,10 @@ class SupabaseSessionRepository:
             sessions_url = f"{self.base_url}/monitoring_sessions?user_id=eq.{user_id}"
             await client.delete(sessions_url, headers=self._get_headers(token, prefer_return=False))
             
+            # Delete personal goals
+            goals_url = f"{self.base_url}/personal_goals?user_id=eq.{user_id}"
+            await client.delete(goals_url, headers=self._get_headers(token, prefer_return=False))
+
             # Delete preferences
             pref_url = f"{self.base_url}/user_preferences?user_id=eq.{user_id}"
             await client.delete(pref_url, headers=self._get_headers(token, prefer_return=False))
@@ -223,3 +235,76 @@ class SupabaseSessionRepository:
                 json={"status": "INTERRUPTED"}
             )
             return len(stale_sessions)
+
+    async def list_goals(self, user_id: str, token: str) -> List[Dict[str, Any]]:
+        url = f"{self.base_url}/personal_goals?user_id=eq.{user_id}&order=created_at.asc"
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(url, headers=self._get_headers(token))
+            if resp.status_code == 200:
+                return resp.json()
+            resp.raise_for_status()
+
+    async def upsert_goal(self, user_id: str, token: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        clean_data = self.filter_goal_payload(payload)
+        clean_data["user_id"] = user_id
+        url = f"{self.base_url}/personal_goals?on_conflict=user_id,goal_type"
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                url,
+                headers=self._get_headers(token, prefer_return=True, upsert=True),
+                json=clean_data
+            )
+            if resp.status_code in (200, 201):
+                rows = resp.json()
+                return rows[0] if rows else clean_data
+            resp.raise_for_status()
+
+    async def delete_goal(self, goal_id: str, token: str) -> bool:
+        url = f"{self.base_url}/personal_goals?id=eq.{goal_id}"
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.delete(url, headers=self._get_headers(token, prefer_return=False))
+            return resp.status_code in (200, 204)
+
+    async def list_sessions_in_range(
+        self,
+        token: str,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        limit: int = 1000
+    ) -> List[Dict[str, Any]]:
+        query_params = [f"limit={limit}", "order=started_at.asc"]
+        if start_time:
+            query_params.append(f"started_at=gte.{start_time}")
+        if end_time:
+            query_params.append(f"started_at=lte.{end_time}")
+        url = f"{self.base_url}/monitoring_sessions?{'&'.join(query_params)}"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url, headers=self._get_headers(token))
+            if resp.status_code == 200:
+                return resp.json()
+            resp.raise_for_status()
+
+    async def list_events_in_range(
+        self,
+        token: str,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        session_ids: Optional[List[str]] = None,
+        limit: int = 5000
+    ) -> List[Dict[str, Any]]:
+        query_params = [f"limit={limit}", "order=timestamp.asc"]
+        if start_time:
+            query_params.append(f"timestamp=gte.{start_time}")
+        if end_time:
+            query_params.append(f"timestamp=lte.{end_time}")
+        if session_ids is not None:
+            if not session_ids:
+                return []
+            ids_str = ",".join(session_ids)
+            query_params.append(f"session_id=in.({ids_str})")
+        url = f"{self.base_url}/risk_events?{'&'.join(query_params)}"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url, headers=self._get_headers(token))
+            if resp.status_code == 200:
+                return resp.json()
+            resp.raise_for_status()
