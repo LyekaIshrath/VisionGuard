@@ -1,5 +1,5 @@
--- ====================================================================
--- VisionGuard Mission 06 — Privacy-First SaaS Database Migration
+﻿-- ====================================================================
+-- VisionGuard Mission 06.5 — Privacy-First SaaS Database Migration
 -- Target: PostgreSQL / Supabase
 --
 -- Security Guarantees:
@@ -23,35 +23,31 @@ CREATE TABLE IF NOT EXISTS public.monitoring_sessions (
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     ended_at TIMESTAMPTZ,
-    duration_seconds INTEGER CHECK (duration_seconds IS NULL OR duration_seconds >= 0),
+    duration_seconds FLOAT CHECK (duration_seconds IS NULL OR duration_seconds >= 0.0),
     status TEXT NOT NULL CHECK (status IN ('ACTIVE', 'COMPLETED', 'INTERRUPTED')),
-    posture_calibrated BOOLEAN NOT NULL DEFAULT false,
-    alertness_calibrated BOOLEAN NOT NULL DEFAULT false,
-    average_posture_score FLOAT CHECK (average_posture_score IS NULL OR (average_posture_score >= 0.0 AND average_posture_score <= 100.0)),
-    average_alertness_score FLOAT CHECK (average_alertness_score IS NULL OR (average_alertness_score >= 0.0 AND average_alertness_score <= 100.0)),
-    average_risk_score FLOAT CHECK (average_risk_score IS NULL OR (average_risk_score >= 0.0 AND average_risk_score <= 100.0)),
     good_posture_seconds FLOAT NOT NULL DEFAULT 0.0 CHECK (good_posture_seconds >= 0.0),
     posture_risk_seconds FLOAT NOT NULL DEFAULT 0.0 CHECK (posture_risk_seconds >= 0.0),
     alertness_risk_seconds FLOAT NOT NULL DEFAULT 0.0 CHECK (alertness_risk_seconds >= 0.0),
-    moderate_risk_events INTEGER NOT NULL DEFAULT 0 CHECK (moderate_risk_events >= 0),
-    high_risk_events INTEGER NOT NULL DEFAULT 0 CHECK (high_risk_events >= 0),
+    average_posture_score FLOAT CHECK (average_posture_score IS NULL OR (average_posture_score >= 0.0 AND average_posture_score <= 100.0)),
+    average_alertness_score FLOAT CHECK (average_alertness_score IS NULL OR (average_alertness_score >= 0.0 AND average_alertness_score <= 100.0)),
+    risk_event_count INTEGER NOT NULL DEFAULT 0 CHECK (risk_event_count >= 0),
+    intervention_count INTEGER NOT NULL DEFAULT 0 CHECK (intervention_count >= 0),
+    device_name TEXT DEFAULT 'VisionGuard Desktop',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- 3. Risk Events Table (Idempotent lifecycle events; zero raw frames/landmarks)
 CREATE TABLE IF NOT EXISTS public.risk_events (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id TEXT PRIMARY KEY,
     session_id UUID NOT NULL REFERENCES public.monitoring_sessions(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT now(),
     category TEXT NOT NULL CHECK (category IN ('POSTURE', 'ALERTNESS', 'COMBINED', 'SYSTEM')),
-    event_status TEXT NOT NULL CHECK (event_status IN ('STARTED', 'RESOLVED')),
-    risk_level TEXT NOT NULL CHECK (risk_level IN ('LOW', 'MODERATE', 'HIGH', 'UNKNOWN')),
-    risk_score FLOAT CHECK (risk_score IS NULL OR (risk_score >= 0.0 AND risk_score <= 100.0)),
-    reason_codes JSONB NOT NULL DEFAULT '[]'::jsonb,
-    message TEXT,
-    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    resolved_at TIMESTAMPTZ,
+    severity TEXT NOT NULL CHECK (severity IN ('LOW', 'MODERATE', 'HIGH', 'UNKNOWN')),
+    reason TEXT NOT NULL,
+    lifecycle TEXT NOT NULL CHECK (lifecycle IN ('STARTED', 'RESOLVED', 'ONGOING')),
     duration_seconds FLOAT CHECK (duration_seconds IS NULL OR duration_seconds >= 0.0),
+    metadata JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -103,3 +99,8 @@ BEGIN
     END IF;
 END
 $$;
+
+-- Table Grants for PostgREST API
+GRANT USAGE ON SCHEMA public TO anon, authenticated;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;

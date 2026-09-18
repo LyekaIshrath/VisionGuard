@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -12,6 +12,7 @@ from app.sessions.aggregator import SessionAggregator
 from app.sessions.repository import SupabaseSessionRepository
 
 logger = logging.getLogger("visionguard.sessions")
+
 
 class SessionService:
     """
@@ -36,7 +37,7 @@ class SessionService:
         else:
             status = self.cloud_status
             if status == "SYNCED":
-                message = "Cloud persistence active and synchronized."
+                message = "Monitoring sessions and risk events synchronized with cloud."
             elif status == "SYNCING":
                 message = "Synchronization operation in progress."
             elif status == "OFFLINE":
@@ -64,12 +65,12 @@ class SessionService:
         self.current_token = token
         self.cloud_session_id = None
         self.last_error = None
-        
+
         self.aggregator = SessionAggregator(
             session_id=self.local_session_id,
             user_id=user_id or "local_user"
         )
-        
+
         if config.is_cloud_configured() and user_id and token:
             self.cloud_status = "SYNCING"
             # Asynchronously create cloud session so camera start is instantaneous
@@ -77,11 +78,32 @@ class SessionService:
                 loop = asyncio.get_running_loop()
                 loop.create_task(self._async_start_cloud_session(self.local_session_id, user_id, token))
             except RuntimeError:
-                asyncio.run(self._async_start_cloud_session(self.local_session_id, user_id, token))
+                pass
         else:
             self.cloud_status = "DISABLED" if not config.is_cloud_configured() else "OFFLINE"
-            
+
         logger.info(f"Local session started: {self.local_session_id} (Cloud status: {self.cloud_status})")
+        return self.local_session_id
+
+    async def start_session_async(self, user_id: Optional[str] = None, token: Optional[str] = None) -> str:
+        """Starts a session and awaits cloud session creation."""
+        self.local_session_id = str(uuid.uuid4())
+        self.current_user_id = user_id
+        self.current_token = token
+        self.cloud_session_id = None
+        self.last_error = None
+
+        self.aggregator = SessionAggregator(
+            session_id=self.local_session_id,
+            user_id=user_id or "local_user"
+        )
+
+        if config.is_cloud_configured() and user_id and token:
+            self.cloud_status = "SYNCING"
+            await self._async_start_cloud_session(self.local_session_id, user_id, token)
+        else:
+            self.cloud_status = "DISABLED" if not config.is_cloud_configured() else "OFFLINE"
+
         return self.local_session_id
 
     async def _async_start_cloud_session(self, session_id: str, user_id: str, token: str) -> None:
@@ -127,11 +149,11 @@ class SessionService:
         if self.aggregator:
             self.aggregator.add_sample(state, mono_time)
 
-    def record_risk_event(self, event: RiskEvent) -> None:
+    def record_risk_event(self, event: Any) -> None:
         """Records a risk event in memory and queues idempotent persistence to Supabase."""
         if self.aggregator:
             self.aggregator.record_risk_event()
-            
+
         if self.current_token and self.current_user_id and config.is_cloud_configured():
             try:
                 loop = asyncio.get_running_loop()
@@ -139,31 +161,54 @@ class SessionService:
             except RuntimeError:
                 pass
 
-    async def _async_persist_risk_event(self, event: RiskEvent, user_id: str, token: str) -> None:
+    async def record_risk_event_async(self, event: Any) -> None:
+        """Records a risk event and awaits persistence to Supabase."""
+        if self.aggregator:
+            self.aggregator.record_risk_event()
+
+        if self.current_token and self.current_user_id and config.is_cloud_configured():
+            await self._async_persist_risk_event(event, self.current_user_id, self.current_token)
+
+    async def _async_persist_risk_event(self, event: Any, user_id: str, token: str) -> None:
         try:
-            dt_utc = (
-                datetime.fromisoformat(event.timestamp)
-                if isinstance(event.timestamp, str)
-                else datetime.now(timezone.utc)
-            )
+            raw_ts = getattr(event, "timestamp", None)
+            if isinstance(raw_ts, str):
+                dt_utc = datetime.fromisoformat(raw_ts)
+            elif isinstance(raw_ts, datetime):
+                dt_utc = raw_ts
+            else:
+                dt_utc = datetime.now(timezone.utc)
+
+            event_id = getattr(event, "id", getattr(event, "event_id", str(uuid.uuid4())))
+            cat_obj = getattr(event, "category", "SYSTEM")
+            cat_val = cat_obj.value if hasattr(cat_obj, "value") else str(cat_obj)
+
+            sev_obj = getattr(event, "severity", getattr(event, "risk_level", getattr(event, "level", "UNKNOWN")))
+            sev_val = sev_obj.value if hasattr(sev_obj, "value") else str(sev_obj)
+
+            lifecycle_obj = getattr(event, "lifecycle", getattr(event, "status", "STARTED"))
+            lifecycle_val = lifecycle_obj.value if hasattr(lifecycle_obj, "value") else str(lifecycle_obj)
+
+            reason_val = getattr(event, "reason", getattr(event, "message", "Risk event"))
+            duration_val = getattr(event, "duration_seconds", getattr(event, "duration_sec", 0.0))
+
             payload = {
-                "id": event.event_id,
+                "id": event_id,
                 "session_id": self.cloud_session_id or self.local_session_id,
                 "user_id": user_id,
                 "timestamp": dt_utc.isoformat(),
-                "category": event.category.value if hasattr(event.category, "value") else str(event.category),
-                "severity": event.severity.value if hasattr(event.severity, "value") else str(event.severity),
-                "reason": event.reason,
-                "lifecycle": event.lifecycle.value if hasattr(event.lifecycle, "value") else str(event.lifecycle),
-                "duration_seconds": event.duration_seconds,
+                "category": cat_val,
+                "severity": sev_val,
+                "reason": reason_val,
+                "lifecycle": lifecycle_val,
+                "duration_seconds": duration_val,
                 "metadata": {
-                    "source_score": event.source_score,
-                    "peak_severity": event.peak_severity.value if hasattr(event.peak_severity, "value") else str(event.peak_severity)
+                    "source": "visionguard_risk_engine"
                 }
             }
             await self.repository.upsert_risk_event(token=token, payload=payload)
         except Exception as e:
-            logger.warning(f"Failed to persist risk event {event.event_id}: {e}")
+            logger.warning(f"Failed to persist risk event: {e}")
 
     def record_intervention(self, intervention: Intervention) -> None:
         if self.aggregator:
@@ -173,12 +218,12 @@ class SessionService:
         """Finalizes the session, computes time-weighted summaries, and queues cloud update."""
         if not self.aggregator:
             return {"status": "NO_ACTIVE_SESSION"}
-            
+
         summary = self.aggregator.get_summary()
         summary["session_id"] = self.local_session_id
         summary["ended_at"] = datetime.now(timezone.utc).isoformat()
         summary["status"] = "COMPLETED"
-        
+
         if self.current_token and (self.cloud_session_id or self.local_session_id) and config.is_cloud_configured():
             target_id = self.cloud_session_id or self.local_session_id
             try:
@@ -186,8 +231,27 @@ class SessionService:
                 loop.create_task(self._async_stop_cloud_session(target_id, self.current_token, summary))
             except RuntimeError:
                 pass
-            
+
         # Reset local state
+        self.aggregator = None
+        self.local_session_id = None
+        self.cloud_session_id = None
+        return summary
+
+    async def stop_session_async(self) -> Dict[str, Any]:
+        """Finalizes the session and awaits cloud persistence."""
+        if not self.aggregator:
+            return {"status": "NO_ACTIVE_SESSION"}
+
+        summary = self.aggregator.get_summary()
+        summary["session_id"] = self.local_session_id
+        summary["ended_at"] = datetime.now(timezone.utc).isoformat()
+        summary["status"] = "COMPLETED"
+
+        if self.current_token and (self.cloud_session_id or self.local_session_id) and config.is_cloud_configured():
+            target_id = self.cloud_session_id or self.local_session_id
+            await self._async_stop_cloud_session(target_id, self.current_token, summary)
+
         self.aggregator = None
         self.local_session_id = None
         self.cloud_session_id = None
@@ -215,6 +279,7 @@ class SessionService:
             self.cloud_status = "ERROR"
             self.last_error = str(e)
             logger.warning(f"Failed to finalize cloud session {session_id}: {e}")
+
 
 # Global singleton
 session_service = SessionService()

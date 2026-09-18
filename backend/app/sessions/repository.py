@@ -1,4 +1,5 @@
-﻿import httpx
+import os
+import httpx
 from typing import Optional, Dict, Any, List
 from app.config import config
 
@@ -20,9 +21,14 @@ class SupabaseSessionRepository:
     Communicates with Supabase / PostgREST using the authenticated user's JWT.
     Enforces Row-Level Security (RLS) on all user operations.
     """
-    def __init__(self):
-        self.base_url = f"{config.SUPABASE_URL.rstrip('/')}/rest/v1" if config.SUPABASE_URL else ""
-        self.anon_key = config.SUPABASE_ANON_KEY
+    @property
+    def base_url(self) -> str:
+        sb_url = os.getenv("SUPABASE_URL") or config.SUPABASE_URL or ""
+        return f"{sb_url.rstrip('/')}/rest/v1" if sb_url else ""
+
+    @property
+    def anon_key(self) -> str:
+        return os.getenv("SUPABASE_ANON_KEY") or config.SUPABASE_ANON_KEY or ""
 
     def _get_headers(self, token: str, prefer_return: bool = True, upsert: bool = False) -> Dict[str, str]:
         headers = {

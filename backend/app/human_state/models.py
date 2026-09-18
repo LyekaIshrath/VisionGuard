@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from pydantic import BaseModel, Field
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 class HumanState(BaseModel):
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=_utc_now)
     track_id: str = Field(..., description="Anonymous track identifier")
     person_detected: bool = False
     face_detected: bool = False
