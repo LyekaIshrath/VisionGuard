@@ -12,7 +12,7 @@ VisionGuard uses a **Hybrid Local-First** architecture:
 |---|---|---|
 | **Local Companion** | Python 3.13 + FastAPI | OpenCV/MediaPipe inference, REST API, WebSocket |
 | **PWA Frontend** | React + Vite | Installable SPA, served from `localhost:5173` or `dist/` |
-| **Cloud** | Supabase (optional) | Persistent session aggregates only — no raw frames |
+| **Database** | MongoDB | Persistent users, derived monitoring sessions, activity intervals, risk events, reports, preferences, and notification data — no raw camera frames |
 
 ```
 Browser/PWA
@@ -24,7 +24,7 @@ Local Companion (FastAPI :8000)
 OpenCV VideoCapture --> MediaPipe --> Analysis --> Alert Orchestrator
     |  aggregated metrics only
     v
-Supabase (optional cloud)
+MongoDB
 ```
 
 ## PWA Status
@@ -166,7 +166,7 @@ copy backend\.env.example backend\.env
 
 Edit .env and set:
 - MONGODB_URI: Your MongoDB connection URI (e.g. mongodb://localhost:27017)
-- MONGODB_DATABASE: Database name (e.g. isionguard)
+- MONGODB_DATABASE: Database name (e.g. visionguard)
 - JWT_SECRET: A secure random secret key for token signing
 
 #### 5. Verify MediaPipe Model Files
@@ -217,3 +217,4 @@ VAPID_PUBLIC_KEY=your_vapid_public_key
 VAPID_PRIVATE_KEY=your_vapid_private_key
 VAPID_SUBSCRIBER_EMAIL=admin@example.com
 `
+
