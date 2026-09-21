@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+from __future__ import annotations
+
+import time
 
 import threading
 from datetime import datetime, timezone
@@ -16,6 +18,7 @@ from app.posture.analyzer import PostureAnalyzer, PostureStatus
 from app.alertness.geometry import extract_face_geometry, FaceGeometry
 from app.alertness.calibration import AlertnessCalibrationService, CalibrationState as AlertnessCalibrationState
 from app.alertness.analyzer import AlertnessAnalyzer, AlertnessStatus
+from app.intelligence.baselines import get_effective_posture_baseline, get_effective_alertness_baseline
 from app.intelligence.risk_engine import RiskEngine
 from app.intelligence.risk_models import RiskLevel
 from app.alerts.engine import InterventionEngine
@@ -57,6 +60,9 @@ class PerceptionEngine:
         self._worker_frames_processed: int = 0
         self._last_processed_frame_id: int = -1
         self._lock = threading.Lock()
+        self._measured_inference_hz: float = 0.0
+        self._inf_window_start: Optional[float] = None
+        self._inf_window_count: int = 0
 
     @property
     def calibration_service(self) -> PostureCalibrationService:
@@ -85,6 +91,8 @@ class PerceptionEngine:
     def start_worker(self, manager: Any) -> None:
         """Start dedicated background perception worker thread consuming newest frames."""
         with self._lock:
+            self._last_processed_frame_id = -1
+            self._worker_frames_processed = 0
             if self._worker_running:
                 return
             self._worker_running = True
@@ -108,22 +116,24 @@ class PerceptionEngine:
 
     def _worker_loop(self, manager: Any) -> None:
         """Worker loop continuously consuming newest raw frame without blocking capture."""
-        import time
         while self._worker_running:
             try:
                 if hasattr(manager, "get_latest_raw_frame"):
                     frame_id, raw_frame = manager.get_latest_raw_frame()
-                    if raw_frame is not None and frame_id > self._last_processed_frame_id:
+                    if raw_frame is not None and (frame_id != self._last_processed_frame_id):
                         self._last_processed_frame_id = frame_id
                         self.process_frame(raw_frame)
                         self._worker_frames_processed += 1
                 time.sleep(0.005)
-            except Exception:
+            except Exception as e:
+                logger.error(f"Perception worker loop error: {e}")
                 time.sleep(0.02)
 
     def reset_session(self) -> None:
         """Reset transient temporal accumulators on monitoring start."""
         with self._lock:
+            self._last_processed_frame_id = -1
+            self._worker_frames_processed = 0
             self._risk_engine.reset_session()
             self._intervention_engine.reset_session()
             self._latest_raw_frame = None
@@ -137,6 +147,7 @@ class PerceptionEngine:
     def stop_session(self) -> None:
         """Stop accumulation and pause timers on monitoring stop."""
         with self._lock:
+            self._last_processed_frame_id = -1
             self._risk_engine.stop_session()
             self._latest_raw_frame = None
             self._latest_pose_result = None
@@ -211,6 +222,14 @@ class PerceptionEngine:
                 return state
 
             self._latest_raw_frame = frame
+            now_inf = time.monotonic()
+            self._inf_window_count += 1
+            if self._inf_window_start is None:
+                self._inf_window_start = now_inf
+            elif now_inf - self._inf_window_start >= 1.0:
+                self._measured_inference_hz = round(self._inf_window_count / (now_inf - self._inf_window_start), 1)
+                self._inf_window_count = 0
+                self._inf_window_start = now_inf
             # Convert BGR to RGB for MediaPipe
             try:
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -244,21 +263,18 @@ class PerceptionEngine:
                 if new_state == CalibrationState.COMPLETED:
                     self._posture_analyzer.set_baseline(self._calibration_service.baseline)
 
-            # Posture analysis
-            if self._calibration_service.is_calibrated:
-                if self._posture_analyzer._baseline != self._calibration_service.baseline:
-                    self._posture_analyzer.set_baseline(self._calibration_service.baseline)
+            # Posture analysis with built-in baseline fallback
+            eff_posture_baseline, p_source, p_base_conf = get_effective_posture_baseline(
+                self._calibration_service.baseline if self._calibration_service.is_calibrated else None
+            )
+            if self._posture_analyzer._baseline != eff_posture_baseline:
+                self._posture_analyzer.set_baseline(eff_posture_baseline)
 
-                posture_res = self._posture_analyzer.analyze(body_geom)
-                posture_status = posture_res.stable_status.value
-                posture_score = posture_res.smoothed_score
-                posture_conf = posture_res.confidence
-                self._latest_posture_res = posture_res
-            else:
-                self._latest_posture_res = None
-                posture_status = PostureStatus.NOT_CALIBRATED.value
-                posture_score = None
-                posture_conf = body_geom.confidence if body_geom else (pose_conf if pose_detected else None)
+            posture_res = self._posture_analyzer.analyze(body_geom)
+            posture_status = posture_res.stable_status.value
+            posture_score = posture_res.smoothed_score
+            posture_conf = posture_res.confidence
+            self._latest_posture_res = posture_res
 
             # --- Mission 04: Alertness Geometry Extraction & Analysis ---
             face_geom: Optional[FaceGeometry] = None
@@ -272,33 +288,28 @@ class PerceptionEngine:
                 if new_alert_state == AlertnessCalibrationState.COMPLETED:
                     self._alertness_analyzer.set_baseline(self._alertness_calibration_service.baseline)
 
-            # Alertness analysis
-            if self._alertness_calibration_service.is_calibrated:
-                if self._alertness_analyzer._baseline != self._alertness_calibration_service.baseline:
-                    self._alertness_analyzer.set_baseline(self._alertness_calibration_service.baseline)
+            # Alertness analysis with built-in baseline fallback
+            eff_alert_baseline, a_source, a_base_conf = get_effective_alertness_baseline(
+                self._alertness_calibration_service.baseline if self._alertness_calibration_service.is_calibrated else None
+            )
+            if self._alertness_analyzer._baseline != eff_alert_baseline:
+                self._alertness_analyzer.set_baseline(eff_alert_baseline)
 
-                alert_res = self._alertness_analyzer.analyze(face_geom)
-                alertness_status = alert_res.status.value
-                alertness_score = alert_res.score
-                eye_state = alert_res.eye_state
-                eye_closure_dur = alert_res.eye_closure_duration
-                blink_rate = alert_res.blink_rate
-                yawn_score = alert_res.yawn_score
-                head_pitch = alert_res.head_pitch
-                alert_conf = alert_res.confidence
-                self._latest_alertness_res = alert_res
-            else:
-                self._latest_alertness_res = None
-                alertness_status = None
-                alertness_score = None
-                eye_state = None
-                eye_closure_dur = None
-                blink_rate = None
-                yawn_score = None
-                head_pitch = face_geom.head_pitch_ratio if face_geom else None
-                alert_conf = face_geom.confidence if face_geom else 0.0
+            alert_res = self._alertness_analyzer.analyze(face_geom)
+            alertness_status = alert_res.status.value
+            alertness_score = alert_res.score
+            eye_state = alert_res.eye_state
+            eye_closure_dur = alert_res.eye_closure_duration
+            blink_rate = alert_res.blink_rate
+            yawn_score = alert_res.yawn_score
+            head_pitch = alert_res.head_pitch
+            alert_conf = alert_res.confidence
+            self._latest_alertness_res = alert_res
 
             final_conf = max(posture_conf or 0.0, alert_conf or 0.0, overall_conf)
+
+            effective_base_src = "PERSONALIZED" if (p_source == "PERSONALIZED" or a_source == "PERSONALIZED") else "BUILT_IN"
+            effective_base_conf = max(p_base_conf, a_base_conf)
 
             state = HumanState(
                 timestamp=datetime.now(timezone.utc),
@@ -316,15 +327,16 @@ class PerceptionEngine:
                 yawn_score=yawn_score,
                 head_pitch=head_pitch,
                 confidence=round(final_conf, 2),
+                blink_count=alert_res.blink_count if alert_res else 0,
+                longest_eye_closure=alert_res.longest_eye_closure if alert_res else 0.0,
+                valid_eye_tracking_seconds=alert_res.valid_eye_tracking_seconds if alert_res else 0.0,
+                baseline_source=effective_base_src,
+                baseline_confidence=effective_base_conf,
             )
 
             # --- Mission 05: Temporal Risk & Intervention Engine ---
             risk_state = self._risk_engine.evaluate(state)
-            if not self._calibration_service.is_calibrated and not self._alertness_calibration_service.is_calibrated:
-                # Uncalibrated baseline
-                state.risk_level = None
-                state.risk_score = None
-            elif risk_state.level == RiskLevel.UNKNOWN:
+            if risk_state.level == RiskLevel.UNKNOWN:
                 state.risk_level = RiskLevel.UNKNOWN.value
                 state.risk_score = None
             else:
@@ -341,38 +353,53 @@ class PerceptionEngine:
 
         Does NOT open a second camera or run inference twice.
         Does NOT persist frames to disk or write landmarks to database.
+        Renders outside lock to prevent preview FPS contention.
         Returns transient JPEG bytes in-memory.
         """
         with self._lock:
-            target_frame = current_frame if current_frame is not None else self._latest_raw_frame
-            if target_frame is None:
+            raw_target = current_frame if current_frame is not None else self._latest_raw_frame
+            if raw_target is None:
                 return None
+            target_frame = raw_target.copy() if current_frame is None else raw_target
+            pose_data = self._latest_pose_result
+            face_data = self._latest_face_result
+            human_state = self._latest_state
+            posture_geom = self._latest_body_geom
+            face_geom = self._latest_face_geom
+            posture_res = self._latest_posture_res
+            alertness_res = self._latest_alertness_res
+            p_baseline = self._posture_analyzer._baseline
+            a_baseline = self._alertness_analyzer._baseline
 
-            normalized_mode = mode.upper() if mode else "MINIMAL"
-            if normalized_mode == "OFF":
-                success, buf = cv2.imencode(".jpg", target_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
-                return buf.tobytes() if success else None
-
-            annotated = self._overlay_renderer.render(
-                frame=target_frame,
-                mode=normalized_mode,
-                pose_data=self._latest_pose_result,
-                face_data=self._latest_face_result,
-                human_state=self._latest_state,
-                posture_geom=self._latest_body_geom,
-                face_geom=self._latest_face_geom,
-                posture_res=self._latest_posture_res,
-                alertness_res=self._latest_alertness_res,
-                posture_baseline=self._posture_analyzer._baseline,
-                alertness_baseline=self._alertness_analyzer._baseline,
-            )
-            success, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 75])
+        normalized_mode = mode.upper() if mode else "MINIMAL"
+        if normalized_mode == "OFF":
+            success, buf = cv2.imencode(".jpg", target_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
             return buf.tobytes() if success else None
+
+        annotated = self._overlay_renderer.render(
+            frame=target_frame,
+            mode=normalized_mode,
+            pose_data=pose_data,
+            face_data=face_data,
+            human_state=human_state,
+            posture_geom=posture_geom,
+            face_geom=face_geom,
+            posture_res=posture_res,
+            alertness_res=alertness_res,
+            posture_baseline=p_baseline,
+            alertness_baseline=a_baseline,
+        )
+        success, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 75])
+        return buf.tobytes() if success else None
 
     def analyze(self, source: WebcamSource) -> Optional[HumanState]:
         """Preserve existing method: analyze latest frame from WebcamSource."""
         frame_bytes = source.read()
         return self.process_frame(frame_bytes)
+
+    @property
+    def inference_hz(self) -> float:
+        return self._measured_inference_hz
 
     def get_latest_state(self) -> HumanState:
         """Return the most recently computed HumanState."""

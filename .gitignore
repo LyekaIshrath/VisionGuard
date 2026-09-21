@@ -33,3 +33,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.log
+*.pyc
+*.pem
+.vapid_keys.json

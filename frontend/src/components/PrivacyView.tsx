@@ -121,7 +121,7 @@ export const PrivacyView: React.FC<PrivacyViewProps> = ({
                 <strong>Confirm Deletion:</strong> This action will permanently remove all your monitoring sessions,
                 risk event histories, and ergonomic preferences.
                 <p className="confirm-clarification">
-                  <strong>Notice:</strong> Your Supabase authentication login account remains active.
+                  <strong>Notice:</strong> Your login credentials remain active in the database.
                   Only application data (sessions, risk events, preferences) will be deleted.
                 </p>
               </div>

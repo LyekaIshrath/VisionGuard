@@ -1,0 +1,1 @@
+"""VisionGuard Monitoring Coordination Module."""

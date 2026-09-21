@@ -33,6 +33,8 @@ import { PrivacyView } from "./components/PrivacyView";
 import { SettingsView } from "./components/SettingsView";
 import { AlertProvider, useAlerts } from "./contexts/AlertContext";
 import { StatusCenterModal } from "./components/StatusCenterModal";
+import { WorkMonitorView } from "./components/WorkMonitorView";
+import { ReportModal } from "./components/ReportModal";
 
 const getApiBase = () => {
   if (window.location.port === "5173") {
@@ -65,36 +67,68 @@ function DashboardInner() {
   const [activeSection, setActiveSection] = useState<string>("overview");
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [activeCalibrationModal, setActiveCalibrationModal] = useState<"posture" | "alertness" | null>(null);
+  const [reportModalOpen, setReportModalOpen] = useState<boolean>(false);
+  const [latestReport, setLatestReport] = useState<any>(null);
+  const [sessionElapsedSec, setSessionElapsedSec] = useState<number>(0);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const reportId = params.get("report") || params.get("session_id");
+    if (reportId) {
+      setLatestReport({ session_id: reportId, id: reportId });
+      setReportModalOpen(true);
+    }
+  }, []);
 
   // Backend & Stream Connection states
   const [backendStatus, setBackendStatus] = useState<"connected" | "disconnected">("disconnected");
   const [wsStatus, setWsStatus] = useState<"connected" | "disconnected">("disconnected");
   const [monitoringState, setMonitoringState] = useState<MonitoringState>("STOPPED");
+  const monitoringStateRef = useRef<MonitoringState>("STOPPED");
+  useEffect(() => {
+    monitoringStateRef.current = monitoringState;
+  }, [monitoringState]);
+
+  useEffect(() => {
+    let interval: any = null;
+    if (monitoringState === "RUNNING") {
+      interval = setInterval(() => {
+        setSessionElapsedSec((prev) => prev + 1);
+      }, 1000);
+    } else {
+      setSessionElapsedSec(0);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [monitoringState]);
   const [cameraState, setCameraState] = useState<string>("NOT_CONFIGURED");
   const [framesReceived, setFramesReceived] = useState<number>(0);
   const [isStartingMonitoring, setIsStartingMonitoring] = useState(false);
   const [previewKey, setPreviewKey] = useState<number>(0);
 
   // Human state from perception stream
-  const [humanState, setHumanState] = useState<HumanStateData>({
-    timestamp: null,
-    track_id: "visionguard-001",
-    person_detected: false,
-    face_detected: false,
-    pose_detected: false,
-    posture_status: "NOT_CALIBRATED",
-    posture_score: null,
-    alertness_status: "NOT_CALIBRATED",
-    alertness_score: null,
-    eye_state: null,
-    eye_closure_duration: null,
-    blink_rate: null,
-    yawn_score: null,
-    head_pitch: null,
-    risk_level: null,
-    risk_score: null,
-    confidence: null,
-  });
+  const STOPPED_HUMAN_STATE: HumanStateData = {
+  timestamp: null,
+  track_id: "visionguard-001",
+  person_detected: false,
+  face_detected: false,
+  pose_detected: false,
+  posture_status: "NOT_CALIBRATED",
+  posture_score: null,
+  alertness_status: "NOT_CALIBRATED",
+  alertness_score: null,
+  eye_state: null,
+  eye_closure_duration: null,
+  blink_rate: null,
+  yawn_score: null,
+  head_pitch: null,
+  risk_level: null,
+  risk_score: null,
+  confidence: null,
+};
+
+  const [humanState, setHumanState] = useState<HumanStateData>(STOPPED_HUMAN_STATE);
 
   // Posture Calibration state
   const [calibration, setCalibration] = useState<CalibrationStatus>({
@@ -174,13 +208,34 @@ function DashboardInner() {
 
       ws.onopen = () => {
         setWsStatus("connected");
+        fetchRiskEvents();
       };
 
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === "human_state" && msg.data) {
+            if (monitoringStateRef.current === "STOPPED") {
+              return;
+            }
+            if (monitoringStateRef.current !== "RUNNING") {
+              setMonitoringState("RUNNING");
+              monitoringStateRef.current = "RUNNING";
+            }
             setHumanState(msg.data);
+            if (Array.isArray(msg.data.recent_events)) {
+              setEventHistory(prev => {
+                const existingIds = new Set(prev.map(e => e.event_id || `${e.timestamp}_${e.category}_${e.status}`));
+                const incoming = (msg.data.recent_events as RiskEvent[]).filter(e => {
+                  const key = e.event_id || `${e.timestamp}_${e.category}_${e.status}`;
+                  return !existingIds.has(key);
+                });
+                if (incoming.length === 0) return prev;
+                const merged = [...incoming, ...prev];
+                merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+                return merged.slice(0, 50);
+              });
+            }
             if (msg.data.active_intervention !== undefined) {
               setActiveIntervention(msg.data.active_intervention);
               if (msg.data.active_intervention) {
@@ -195,7 +250,14 @@ function DashboardInner() {
             }
           } else if (msg.type === "status" && msg.data) {
             if (msg.data.state) {
-              setMonitoringState(msg.data.state);
+              const raw = msg.data.state as string;
+              const mapped: MonitoringState = (raw === "MONITORING" || raw === "RUNNING") ? "RUNNING" : (raw as MonitoringState);
+              setMonitoringState(mapped);
+              monitoringStateRef.current = mapped;
+              if (mapped === "STOPPED") {
+                setCameraState("STANDBY");
+                setHumanState(STOPPED_HUMAN_STATE);
+              }
             }
             if (msg.data.camera) {
               setCameraState(msg.data.camera);
@@ -244,7 +306,10 @@ function DashboardInner() {
       const res = await fetch(`${getApiBase()}/api/v1/monitoring/status`);
       if (res.ok) {
         const data: SystemStatus = await res.json();
-        setMonitoringState(data.state);
+        const raw = data.state as string;
+        const mapped: MonitoringState = (raw === "MONITORING" || raw === "RUNNING") ? "RUNNING" : (data.state as MonitoringState) || "STOPPED";
+        setMonitoringState(mapped);
+        monitoringStateRef.current = mapped;
         setCameraState(data.camera);
         if (typeof data.frames_received === "number") {
           setFramesReceived(data.frames_received);
@@ -336,18 +401,29 @@ function DashboardInner() {
         });
         if (res.ok) {
           const data = await res.json();
-          if (data.status === "STARTED" || data.status === "ALREADY_RUNNING") {
+          if (data.status === "STARTED" || data.status === "ALREADY_RUNNING" || data.status === "MONITORING") {
             setMonitoringState("RUNNING");
+            monitoringStateRef.current = "RUNNING";
             setPreviewKey((k) => k + 1);
           } else if (data.status === "CAMERA_ERROR") {
             setMonitoringState("CAMERA_ERROR");
+            monitoringStateRef.current = "CAMERA_ERROR";
           }
         }
       } else {
         const res = await fetch(`${getApiBase()}/api/v1/monitoring/stop`, { method: "POST" });
         if (res.ok) {
+          const data = await res.json();
           setMonitoringState("STOPPED");
+          monitoringStateRef.current = "STOPPED";
+          setCameraState("STANDBY");
+          setHumanState(STOPPED_HUMAN_STATE);
+          setActiveIntervention(null);
           resetSession();
+          if (data && (data.session_summary || data.report)) {
+            setLatestReport(data.session_summary || data);
+            setReportModalOpen(true);
+          }
         }
       }
       await fetchMonitoringStatus();
@@ -470,13 +546,14 @@ function DashboardInner() {
 
   const handleNavigate = (sectionId: string) => {
     setActiveSection(sectionId);
-    if (sectionId === "overview") {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-      return;
-    }
-    const el = document.getElementById(sectionId);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (sectionId !== "overview" && sectionId !== "work-monitor") {
+      setTimeout(() => {
+        const el = document.getElementById(sectionId);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }, 50);
     }
   };
 
@@ -553,7 +630,30 @@ function DashboardInner() {
               onOpenAuth={() => setAuthModalOpen(true)}
             />
           ) : activeSection === "settings-section" ? (
-            <SettingsView />
+            <SettingsView
+              apiBase={getApiBase()}
+              onOpenPostureCalibration={() => setActiveCalibrationModal("posture")}
+              onOpenAlertnessCalibration={() => setActiveCalibrationModal("alertness")}
+              canCalibratePosture={canCalibratePosture}
+              canCalibrateAlertness={canCalibrateAlertness}
+              postureCalibrated={calibration.state === "COMPLETED"}
+              alertnessCalibrated={alertnessCalib.state === "COMPLETED"}
+            />
+          ) : activeSection === "work-monitor" ? (
+            <WorkMonitorView
+              monitoringState={monitoringState}
+              cameraState={cameraState}
+              humanState={humanState}
+              previewKey={previewKey}
+              apiBase={getApiBase()}
+              sessionElapsedSec={sessionElapsedSec}
+              latestReport={latestReport}
+              onOpenReport={() => setReportModalOpen(true)}
+              eventHistory={eventHistory}
+              onClearHistory={clearRiskHistory}
+              onToggleMonitoring={toggleMonitoring}
+              isStarting={isStartingMonitoring}
+            />
           ) : (
             <>
               {/* Top Primary Grid: Live Camera (60-65%) + Risk Intelligence (35-40%) */}
@@ -569,6 +669,7 @@ function DashboardInner() {
                 <RiskCard
                   riskStatus={riskStatus}
                   overallRiskLevel={overallRiskLevel}
+                  isRunning={monitoringState === "RUNNING"}
                 />
               </div>
 
@@ -580,6 +681,7 @@ function DashboardInner() {
                   calibration={calibration}
                   canCalibrate={canCalibratePosture}
                   onOpenCalibration={() => setActiveCalibrationModal("posture")}
+                  isRunning={monitoringState === "RUNNING"}
                 />
 
                 <AlertnessCard
@@ -589,6 +691,7 @@ function DashboardInner() {
                   calibration={alertnessCalib}
                   canCalibrate={canCalibrateAlertness}
                   onOpenCalibration={() => setActiveCalibrationModal("alertness")}
+                  isRunning={monitoringState === "RUNNING"}
                 />
               </div>
 
@@ -635,6 +738,14 @@ function DashboardInner() {
           isActionInProgress={isActionInProgress}
           onStart={activeCalibrationModal === "posture" ? startPostureCalibration : startAlertnessCalibration}
           onReset={activeCalibrationModal === "posture" ? resetPostureCalibration : resetAlertnessCalibration}
+        />
+      )}
+
+      {/* Work Session Final Report Modal */}
+      {reportModalOpen && (
+        <ReportModal
+          report={latestReport}
+          onClose={() => setReportModalOpen(false)}
         />
       )}
 

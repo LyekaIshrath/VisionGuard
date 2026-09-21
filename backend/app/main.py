@@ -7,6 +7,7 @@ from app.middleware.security import (
     CorrelationIdMiddleware,
     configure_structured_logging,
 )
+from app.api.auth import router as auth_router
 from app.api.router import router as api_router
 from app.api.monitoring import router as monitoring_router
 from app.api.posture import router as posture_router
@@ -18,6 +19,7 @@ from app.api.user import router as user_router
 from app.api.cloud import router as cloud_router
 from app.api.goals import router as goals_router
 from app.api.reports import router as reports_router
+from app.api.notifications import router as notifications_router
 from app.camera.manager import get_camera_manager
 
 configure_structured_logging(debug=debug)
@@ -38,6 +40,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Requested-With"],
 )
 
+app.include_router(auth_router, prefix="/api/v1")
 app.include_router(api_router, prefix="/api/v1")
 app.include_router(monitoring_router, prefix="/api/v1")
 app.include_router(posture_router, prefix="/api/v1")
@@ -49,6 +52,7 @@ app.include_router(user_router, prefix="/api/v1")
 app.include_router(cloud_router, prefix="/api/v1")
 app.include_router(goals_router, prefix="/api/v1")
 app.include_router(reports_router, prefix="/api/v1")
+app.include_router(notifications_router)
 
 
 @app.get("/health")
@@ -62,3 +66,28 @@ async def health_check():
         "camera_state": cam_status.get("state", "STOPPED"),
         "camera_index": cam_status.get("camera_index", 0),
     }
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.exceptions import RequestValidationError
+import logging
+
+app_logger = logging.getLogger("visionguard.app")
+
+@app.exception_handler(Exception)
+async def global_unhandled_exception_handler(request: Request, exc: Exception):
+    """Secure top-level exception handler.
+    Returns structured JSON with generic message. Never leaks tracebacks,
+    filesystem paths, exception internals, credentials, or DB specifics.
+    Full traceback logged securely on server-side only.
+    """
+    if isinstance(exc, (StarletteHTTPException, RequestValidationError)):
+        # Let Starlette / FastAPI standard handlers handle HTTP status codes and validation errors
+        raise exc
+    app_logger.error(f"Unhandled server error on {request.method} {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
+

@@ -19,8 +19,8 @@ export const LiveCameraCard: React.FC<LiveCameraCardProps> = ({
   humanState,
 }) => {
   const isRunning = monitoringState === "RUNNING";
-  const isCameraReady = cameraState === "READY";
-  const isBusyOrUnavailable = cameraState === "CAMERA_BUSY_OR_UNAVAILABLE" || cameraState === "CAMERA_ERROR";
+  const isCameraReady = cameraState === "LIVE" || cameraState === "READY";
+  const isBusyOrUnavailable = cameraState === "CAMERA_BUSY" || cameraState === "CAMERA_BUSY_OR_UNAVAILABLE" || cameraState === "NO_CAMERA" || cameraState === "ERROR" || cameraState === "CAMERA_ERROR";
   const isNoFrames = cameraState === "NO_FRAMES";
   const [overlayMode, setOverlayMode] = useState<OverlayModeType>("MINIMAL");
 
@@ -29,7 +29,7 @@ export const LiveCameraCard: React.FC<LiveCameraCardProps> = ({
       <div className="card-header">
         <div className="card-title-group">
           <h2 className="card-title">LIVE CAMERA</h2>
-          <span className="card-subtitle">Authoritative OpenCV VideoCapture Stream</span>
+          <span className="card-subtitle">Local Camera Feed &bull; Clean Geometry</span>
         </div>
         <div className="card-header-actions">
           {isRunning && isCameraReady && (
@@ -50,15 +50,17 @@ export const LiveCameraCard: React.FC<LiveCameraCardProps> = ({
             <div className="camera-feed-wrapper">
               <img
                 src={`${apiBase}/api/v1/monitoring/preview?overlay=${overlayMode}&t=${previewKey}`}
-                alt="Live camera feed with landmark and posture skeleton overlay"
+                alt="Live camera feed with clean human geometry overlay"
                 className="camera-video-feed"
               />
               <div className="camera-overlay-top">
-                <span className="overlay-badge live">● LIVE 14 FPS</span>
+                <span className="overlay-badge live">
+                  ● LIVE {typeof humanState.preview_fps === "number" && humanState.preview_fps > 0 ? `${humanState.preview_fps.toFixed(0)} FPS` : (typeof humanState.capture_fps === "number" && humanState.capture_fps > 0 ? `${humanState.capture_fps.toFixed(0)} FPS` : "LIVE")}
+                </span>
               </div>
               <div className="camera-overlay-bottom">
                 <div className="detection-pills">
-                  <span className={`det-pill ${humanState.person_detected ? "detected" : ""}`}>
+                  <span className={`det-pill ${humanState.person_detected || humanState.person_present ? "detected" : ""}`}>
                     <span className="det-dot" /> Person
                   </span>
                   <span className={`det-pill ${humanState.face_detected ? "detected" : ""}`}>
@@ -80,7 +82,7 @@ export const LiveCameraCard: React.FC<LiveCameraCardProps> = ({
                 </svg>
               </div>
               <p className="placeholder-title">Camera Busy or Unavailable</p>
-              <p className="placeholder-sub">The local companion cannot access the webcam. Ensure no other application (Zoom, Teams, etc.) is holding the camera and that the device is connected.</p>
+              <p className="placeholder-sub">The local application cannot access the webcam. Ensure no other application (Zoom, Teams, etc.) is holding the camera.</p>
             </div>
           ) : isNoFrames ? (
             <div className="camera-placeholder warning">
@@ -92,13 +94,13 @@ export const LiveCameraCard: React.FC<LiveCameraCardProps> = ({
                 </svg>
               </div>
               <p className="placeholder-title">No Video Frames Received</p>
-              <p className="placeholder-sub">The camera device was opened by the local companion, but video frames timed out.</p>
+              <p className="placeholder-sub">The camera device was opened, but video frame acquisition timed out (&gt;1500ms). Reconnect attempt active.</p>
             </div>
           ) : (
             <div className="camera-placeholder connecting">
               <div className="placeholder-spinner" aria-hidden="true" />
               <p className="placeholder-title">Connecting to camera capture...</p>
-              <p className="placeholder-sub">Waiting for initial video frames from integrated webcam.</p>
+              <p className="placeholder-sub">Acquiring video frames from integrated webcam.</p>
             </div>
           )
         ) : (
@@ -109,15 +111,15 @@ export const LiveCameraCard: React.FC<LiveCameraCardProps> = ({
                 <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
               </svg>
             </div>
-            <p className="placeholder-title">Camera Monitoring is Paused</p>
-            <p className="placeholder-sub">Click "Start Monitoring" in the header to activate real-time edge analysis.</p>
+            <p className="placeholder-title">Camera Monitoring is Standby</p>
+            <p className="placeholder-sub">Click "START MONITORING" to begin tracking your work session.</p>
           </div>
         )}
       </div>
 
       <div className="card-footer camera-footer">
         <div className="overlay-selector-container">
-          <span className="overlay-selector-label">Overlay</span>
+          <span className="overlay-selector-label">Geometry Overlay</span>
           <div className="overlay-pill-group" role="radiogroup" aria-label="Overlay Mode">
             <button
               type="button"
@@ -135,9 +137,9 @@ export const LiveCameraCard: React.FC<LiveCameraCardProps> = ({
               aria-checked={overlayMode === "MINIMAL"}
               className={`overlay-pill-btn ${overlayMode === "MINIMAL" ? "active" : ""}`}
               onClick={() => setOverlayMode("MINIMAL")}
-              title="Posture skeleton, face geometry, and telemetry badges"
+              title="Clean geometry skeleton, head axis, and alignment points"
             >
-              MINIMAL
+              CLEAN GEOMETRY
             </button>
             <button
               type="button"
@@ -145,9 +147,9 @@ export const LiveCameraCard: React.FC<LiveCameraCardProps> = ({
               aria-checked={overlayMode === "DEBUG"}
               className={`overlay-pill-btn ${overlayMode === "DEBUG" ? "active" : ""}`}
               onClick={() => setOverlayMode("DEBUG")}
-              title="Detailed real-time telemetry metrics and thresholds"
+              title="Detailed telemetry metrics and thresholds"
             >
-              DEBUG
+              DETAILED
             </button>
           </div>
         </div>
@@ -157,7 +159,7 @@ export const LiveCameraCard: React.FC<LiveCameraCardProps> = ({
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
             <path d="M7 11V7a5 5 0 0 1 10 0v4" />
           </svg>
-          <span>Local Processing • Frames are not stored</span>
+          <span>Local Processing &bull; Zero Frames Stored</span>
         </div>
       </div>
     </section>

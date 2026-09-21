@@ -56,6 +56,26 @@ class RiskEngine:
         # Most recent evaluation snapshot
         self._latest_risk_state: OverallRiskState = self._create_initial_state()
 
+    def reset(self) -> None:
+        """Reset temporal duration accumulators and state machine for new session."""
+        self._is_active = False
+        self._posture_non_good_duration = 0.0
+        self._posture_good_recovery_duration = 0.0
+        self._last_posture_timestamp = None
+        self._last_valid_posture_timestamp = None
+        self._current_posture_risk_score = 0.0
+
+        self._alertness_drowsy_duration = 0.0
+        self._alertness_recovery_duration = 0.0
+        self._last_alertness_timestamp = None
+        self._last_valid_alertness_timestamp = None
+        self._current_alertness_risk_score = 0.0
+
+        self._overall_level = RiskLevel.UNKNOWN
+        self._pending_level = None
+        self._pending_level_since = None
+        self._latest_risk_state = self._create_initial_state()
+
     def _create_initial_state(self) -> OverallRiskState:
         p_state = DomainRiskState(
             category=RiskCategory.POSTURE,

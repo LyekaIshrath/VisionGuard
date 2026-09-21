@@ -29,6 +29,8 @@ class AlertChannel(str, Enum):
     IN_APP = "IN_APP"
     BROWSER_NOTIFICATION = "BROWSER_NOTIFICATION"
     VOICE = "VOICE"
+    SMS = "SMS"
+    MOBILE_PUSH = "MOBILE_PUSH"
 
 
 class AlertPriority(str, Enum):
@@ -79,3 +81,15 @@ class AlertAction(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     priority: AlertPriority = AlertPriority.NORMAL
     requires_acknowledgement: bool = False
+
+
+class MobilePushPayload(BaseModel):
+    """Strictly derived, privacy-safe mobile push notification payload.
+    Zero raw frames, zero landmarks, zero biometric geometry, zero keystroke data.
+    """
+    event_type: str = Field(..., description="Event type classification")
+    severity: str = Field(default="NORMAL", description="Alert severity level")
+    title: str = Field(..., description="User visible notification title")
+    message: str = Field(..., description="User visible notification message")
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    session_id: Optional[str] = Field(default=None, description="Associated session id")

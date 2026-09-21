@@ -1,3 +1,12 @@
+export type WorkActivityState =
+  | "ENGAGED"
+  | "OBSERVING"
+  | "ATTENTION_AWAY"
+  | "AWAY"
+  | "UNKNOWN"
+  | "ACTIVE"
+  | "LOW_ACTIVITY";
+
 export type PostureStatus =
   | "NOT_CALIBRATED"
   | "GOOD"
@@ -103,6 +112,33 @@ export interface HumanStateData {
   active_reasons?: string[];
   active_intervention?: Intervention | null;
   confidence: number | null;
+  session_id?: string | null;
+  monitoring_state?: string | null;
+  activity_state?: WorkActivityState | null;
+  activity_score?: number | null;
+  activity_confidence?: number | null;
+  activity_reason_codes?: string[];
+  person_present?: boolean;
+  blink_count?: number | null;
+  longest_eye_closure?: number | null;
+  valid_eye_tracking_seconds?: number | null;
+  head_yaw?: number | null;
+  head_roll?: number | null;
+  neck_inclination?: number | null;
+  keyboard_activity_count?: number | null;
+  mouse_activity_count?: number | null;
+  idle_seconds?: number | null;
+  baseline_source?: string | null;
+  capture_fps?: number | null;
+  preview_fps?: number | null;
+  inference_hz?: number | null;
+  screen_activity_level?: "CHANGING" | "LOW_CHANGE" | "STATIC" | "UNKNOWN" | null;
+  screen_change_score?: number | null;
+  camera_state?: string | null;
+  last_frame_age_ms?: number | null;
+  eyes_closed?: boolean | null;
+  mouse_click_count?: number | null;
+  scroll_count?: number | null;
 }
 
 export type MonitoringState =
@@ -119,6 +155,9 @@ export interface SystemStatus {
   camera_index: number;
   backend?: string;
   frames_received?: number;
+  capture_fps?: number;
+  preview_fps?: number;
+  inference_hz?: number;
 }
 
 export type CloudSyncStatus = "DISABLED" | "SYNCING" | "SYNCED" | "OFFLINE" | "ERROR";
@@ -200,6 +239,12 @@ export interface UserPreferences {
   data_retention_days?: number;
   timezone?: string | null;
   alert_language?: "en" | "ta" | "en+ta";
+  mobile_push_enabled?: boolean;
+  sms_alerts_enabled?: boolean;
+  notify_posture?: boolean;
+  notify_alertness?: boolean;
+  notify_extended_away?: boolean;
+  notify_session_complete?: boolean;
 }
 
 // ==========================================
@@ -307,4 +352,17 @@ export interface SessionReport {
   event_breakdown: Record<string, number>;
   severity_breakdown: Record<string, number>;
   events: RiskEventRecord[];
+}
+
+
+export interface User {
+  id: string;
+  _id?: string;
+  email?: string;
+  display_name?: string;
+  phone_number?: string;
+  phone_masked?: string;
+  phone_verified?: boolean;
+  phone_verified_at?: string;
+  status?: string;
 }

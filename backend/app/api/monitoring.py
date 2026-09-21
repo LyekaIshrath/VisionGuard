@@ -19,6 +19,7 @@ from app.auth.models import AuthenticatedUser
 from app.auth.dependencies import get_optional_current_user
 
 from app.sessions.service import session_service
+from app.coordination.coordinator import get_monitoring_coordinator, MonitoringCoordinator
 
 
 
@@ -36,6 +37,10 @@ def get_manager() -> CameraManager:
 
 
 
+def get_coordinator() -> MonitoringCoordinator:
+    return get_monitoring_coordinator()
+
+
 def get_perception() -> PerceptionEngine:
 
     return get_perception_engine()
@@ -44,61 +49,48 @@ def get_perception() -> PerceptionEngine:
 
 
 
-@router.post("/monitoring/start", summary="Start webcam monitoring")
-
+@router.post("/monitoring/start", summary="Start unified local monitoring session")
 async def monitoring_start(
-
+    coordinator: MonitoringCoordinator = Depends(get_coordinator),
     manager: CameraManager = Depends(get_manager),
-
-    perception: PerceptionEngine = Depends(get_perception),
-
     user: Optional[AuthenticatedUser] = Depends(get_optional_current_user),
-
 ):
-
-    """Start webcam monitoring and hook authoritative perception pipeline."""
-
-    result = manager.start()
-
-    if result in ("STARTED", "ALREADY_RUNNING"):
-
-        perception.reset_session()
-
-        user_id = user.id if user else None
-
-        token = user.token if user else None
-
-        session_service.start_session(user_id=user_id, token=token)
-
-        perception.start_worker(manager)
-
-    return {"status": result, "camera_index": manager.camera_index}
-
-
-
+    """Atomically start all monitoring subsystems under a single session."""
+    user_id = user.id if user else None
+    token = user.token if user else None
+    result = coordinator.start_monitoring(user_id=user_id, token=token)
+    if not result.get("success", False) and result.get("status") != "ALREADY_RUNNING":
+        raise HTTPException(status_code=500, detail=result)
+    return {
+        "status": result.get("status", "STARTED"),
+        "session_id": result.get("session_id"),
+        "started_at": result.get("started_at"),
+        "baseline_source": result.get("baseline_source", "BUILT_IN"),
+        "camera_index": manager.camera_index,
+    }
 
 
 @router.post("/monitoring/stop", summary="Stop monitoring and release camera")
-
 async def monitoring_stop(
-
-    manager: CameraManager = Depends(get_manager),
-
-    perception: PerceptionEngine = Depends(get_perception),
-
+    coordinator: MonitoringCoordinator = Depends(get_coordinator),
 ):
+    """Atomically stop monitoring and finalize session report."""
+    res = coordinator.stop_monitoring()
+    return {
+        "status": res.get("status", "STOPPED"),
+        "session_id": res.get("session_id"),
+        "session_summary": res.get("session_summary"),
+        "timeline_events_count": res.get("timeline_events_count", 0),
+        "timeline_events": res.get("timeline_events", coordinator.get_timeline()),
+    }
 
-    """Stop monitoring and release the camera."""
 
-    session_summary = session_service.stop_session()
-
-    perception.stop_session()
-
-    perception.stop_worker()
-
-    result = manager.stop()
-
-    return {"status": result, "session_summary": session_summary}
+@router.get("/monitoring/timeline", summary="Return event timeline for active session")
+async def monitoring_timeline(
+    coordinator: MonitoringCoordinator = Depends(get_coordinator),
+):
+    """Return timestamped state-transition and risk events for current session."""
+    return {"events": coordinator.timeline_events}
 
 
 
@@ -106,11 +98,16 @@ async def monitoring_stop(
 
 @router.get("/monitoring/status", summary="Return actual monitoring/camera/perception state")
 
-async def monitoring_status(manager: CameraManager = Depends(get_manager)):
+async def monitoring_status(
+    manager: CameraManager = Depends(get_manager),
+    perception: PerceptionEngine = Depends(get_perception),
+):
 
     """Return the actual state of monitoring, camera, and perception services."""
 
-    return manager.status()
+    status = manager.status()
+    status["inference_fps"] = perception.inference_hz
+    return status
 
 
 
@@ -263,7 +260,7 @@ async def monitoring_ws(
     manager: CameraManager = Depends(get_manager),
 
     engine: PerceptionEngine = Depends(get_perception),
-
+    coordinator: MonitoringCoordinator = Depends(get_coordinator),
 ):
 
     """WebSocket endpoint streaming real-time HumanState updates."""
@@ -377,6 +374,44 @@ async def monitoring_ws(
                     ),
 
                     "confidence": state.confidence,
+                    "recent_events": [
+                        {
+                            "event_id": ev.event_id,
+                            "timestamp": ev.timestamp.isoformat() if hasattr(ev.timestamp, "isoformat") else str(ev.timestamp),
+                            "category": ev.category.value if hasattr(ev.category, "value") else str(ev.category),
+                            "status": ev.status.value if hasattr(ev.status, "value") else str(ev.status),
+                            "risk_level": ev.risk_level.value if hasattr(ev.risk_level, "value") else str(ev.risk_level),
+                            "risk_score": ev.risk_score,
+                            "message": ev.message,
+                            "reason_codes": [r.value if hasattr(r, "value") else str(r) for r in (ev.reason_codes or [])],
+                            "duration_sec": ev.duration_sec,
+                        }
+                        for ev in list(engine.intervention_engine.event_history)
+                    ],
+                    "session_id": coordinator.session_id,
+                    "monitoring_state": coordinator.state.value,
+                    "activity_state": state.activity_state or "UNKNOWN",
+                    "activity_score": state.activity_score,
+                    "activity_confidence": state.activity_confidence,
+                    "activity_reason_codes": state.activity_reason_codes or [],
+                    "person_present": state.person_detected,
+                    "blink_count": state.blink_count or 0,
+                    "longest_eye_closure": state.longest_eye_closure or 0.0,
+                    "valid_eye_tracking_seconds": state.valid_eye_tracking_seconds or 0.0,
+                    "head_yaw": state.head_yaw,
+                    "head_roll": state.head_roll,
+                    "neck_inclination": state.neck_inclination,
+                    "keyboard_activity_count": state.keyboard_activity_count or 0,
+                    "mouse_activity_count": state.mouse_activity_count or 0,
+                    "idle_seconds": state.idle_seconds or 0.0,
+                    "baseline_source": state.baseline_source or "BUILT_IN",
+                    "capture_fps": getattr(manager._source, "capture_fps", 0.0) if manager._source else 0.0,
+                    "preview_fps": getattr(coordinator, "preview_fps", getattr(coordinator, "_preview_fps", 0.0)),
+                    "inference_hz": getattr(engine, "inference_hz", 0.0),
+                    "screen_activity_level": getattr(state, "screen_activity_level", "UNKNOWN"),
+                    "screen_change_score": getattr(state, "screen_change_score", 0.0),
+                    "camera_state": (manager._source.camera_state.value if manager._source and hasattr(manager._source, "camera_state") else "STOPPED"),
+                    "last_frame_age_ms": getattr(manager._source, "last_frame_age_ms", 9999.0) if manager._source else 9999.0,
 
                 }
 

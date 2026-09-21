@@ -13,7 +13,7 @@ CSP_DIRECTIVES = "; ".join([
     "font-src 'self' https://fonts.gstatic.com",
     "script-src 'self'",
     "img-src 'self' data: blob:",
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co ws://localhost:8000 ws://127.0.0.1:8000",
+    "connect-src 'self' ws://localhost:8000 ws://127.0.0.1:8000",
     "worker-src 'none'",
     "object-src 'none'",
     "base-uri 'self'",

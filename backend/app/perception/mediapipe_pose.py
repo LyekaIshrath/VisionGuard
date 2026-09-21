@@ -101,8 +101,16 @@ class MediaPipePose:
                     'right_ear': 8,
                     'left_shoulder': 11,
                     'right_shoulder': 12,
+                    'left_elbow': 13,
+                    'right_elbow': 14,
+                    'left_wrist': 15,
+                    'right_wrist': 16,
                     'left_hip': 23,
                     'right_hip': 24,
+                    'left_knee': 25,
+                    'right_knee': 26,
+                    'left_ankle': 27,
+                    'right_ankle': 28,
                 }
 
                 visibilities = []
@@ -130,9 +138,19 @@ class MediaPipePose:
                     sum(visibilities) / len(visibilities) if visibilities else 1.0
                 )
 
+                all_landmarks = [
+                    {
+                        'x': float(lm.x),
+                        'y': float(lm.y),
+                        'z': float(getattr(lm, 'z', 0.0)),
+                        'visibility': float(getattr(lm, 'visibility', 1.0) if getattr(lm, 'visibility', None) is not None else 1.0),
+                    }
+                    for lm in lms
+                ]
                 return {
                     "pose_detected": True,
                     "landmarks": key_points,
+                    "all_landmarks": all_landmarks,
                     "confidence": round(self._last_confidence, 4),
                 }
             else:
@@ -264,14 +282,35 @@ class MediaPipeFace:
                 head_ref = {
                     "forehead": _pt(10),
                     "nose_tip": _pt(1),
+                    "nose_top": _pt(168),
+                    "nose_bottom": _pt(2),
                     "chin": _pt(152),
                 }
+
+                eyebrows = {
+                    "left_eyebrow": [_pt(i) for i in (70, 63, 105, 66, 107)],
+                    "right_eyebrow": [_pt(i) for i in (336, 296, 334, 293, 300)],
+                }
+
+                jawline = [_pt(i) for i in (234, 93, 132, 58, 172, 136, 150, 149, 176, 148, 152, 377, 400, 378, 379, 365, 397, 288, 361, 323, 454)]
+
+                all_face_landmarks = [
+                    {
+                        'x': float(lm.x),
+                        'y': float(lm.y),
+                        'z': float(getattr(lm, 'z', 0.0)),
+                    }
+                    for lm in lms
+                ]
 
                 return {
                     "face_detected": True,
                     "eye_landmarks": eye_landmarks,
                     "mouth_landmarks": mouth_landmarks,
                     "head_reference": head_ref,
+                    "eyebrows": eyebrows,
+                    "jawline": jawline,
+                    "all_landmarks": all_face_landmarks,
                     "confidence": self._last_confidence,
                 }
             else:

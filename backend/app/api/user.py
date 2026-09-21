@@ -12,6 +12,12 @@ router = APIRouter(prefix="/user", tags=["user"])
 
 class UserPreferencesUpdate(BaseModel):
     browser_notifications_enabled: Optional[bool] = None
+    sms_alerts_enabled: Optional[bool] = None
+    mobile_push_enabled: Optional[bool] = None
+    notify_posture: Optional[bool] = None
+    notify_alertness: Optional[bool] = None
+    notify_extended_away: Optional[bool] = None
+    notify_session_complete: Optional[bool] = None
     voice_alerts_enabled: Optional[bool] = None
     voice_volume: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     voice_rate: Optional[float] = Field(default=None, ge=0.5, le=2.0)
@@ -115,7 +121,7 @@ async def delete_user_data(
     Delete My VisionGuard Data.
     Permanently removes all monitoring sessions, risk events, preferences, and profile.
     NOTE: As per privacy guidelines, this operation deletes all application data,
-    while the Supabase Auth login account itself remains active until explicitly deleted in Auth.
+    while the user login credentials remain in the accounts database.
     """
     try:
         res = await session_service.repository.delete_user_data(

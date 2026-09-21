@@ -19,7 +19,7 @@ class AlertnessConfig:
 
     # --- Blink Detection ---
     # Minimum and maximum duration for an eye closure to be classified as a normal blink
-    blink_min_duration_sec: float = 0.05
+    blink_min_duration_sec: float = 0.035
     blink_max_duration_sec: float = 0.40
 
     # Minimum valid observation time before exposing blinks/min rate

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { Intervention, UserPreferences } from "../types";
 import { speechProvider } from "../services/voiceAlertProvider";
+import { naturalAudioProvider } from "../services/naturalAudioAlertProvider";
 import { voiceQueue } from "../services/voiceQueue";
 import { notificationService } from "../services/browserNotifications";
 import { apiFetch } from "../services/apiClient";
@@ -24,6 +25,7 @@ interface AlertContextValue {
   setAlertLanguage: (lang: "en" | "ta" | "en+ta") => Promise<void>;
   updatePreferences: (updates: Partial<UserPreferences>) => Promise<void>;
   requestBrowserNotifications: () => Promise<boolean>;
+  testBrowserNotification: () => boolean;
   acknowledgeAlert: (interventionId: string) => Promise<void>;
   isAcknowledged: (interventionId: string) => boolean;
   testVoiceAlert: () => void;
@@ -34,7 +36,7 @@ interface AlertContextValue {
 
 const DEFAULT_PREFERENCES: UserPreferences = {
   browser_notifications_enabled: false,
-  voice_alerts_enabled: false,
+  voice_alerts_enabled: true,
   voice_volume: 0.8,
   voice_rate: 1.0,
   voice_pitch: 1.0,
@@ -42,6 +44,11 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   selected_voice: null,
   data_retention_days: undefined,
   alert_language: "en",
+  mobile_push_enabled: false,
+  notify_posture: true,
+  notify_alertness: true,
+  notify_extended_away: true,
+  notify_session_complete: true,
 };
 
 const AlertContext = createContext<AlertContextValue | null>(null);
@@ -49,10 +56,7 @@ const AlertContext = createContext<AlertContextValue | null>(null);
 export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: string }> = ({ children, apiBase = "" }) => {
   const { user, token } = useAuth();
 
-  // Transient runtime state (never saved to database)
   const [isMuted, setIsMuted] = useState<boolean>(false);
-
-  // Persistent preferences state
   const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES);
   const [browserPermission, setBrowserPermission] = useState<NotificationPermission>(
     notificationService.getPermission()
@@ -60,7 +64,6 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
   const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [acknowledgedAlertIds, setAcknowledgedAlertIds] = useState<Set<string>>(new Set());
 
-  // Ref to prevent race conditions or repeated deliveries
   const dispatchedIds = useRef<Set<string>>(new Set());
 
   // Load available voices
@@ -68,6 +71,11 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
     speechProvider.getVoices().then((voices) => {
       setAvailableVoices(voices);
     });
+  }, []);
+
+  // Sync browser permission
+  useEffect(() => {
+    setBrowserPermission(notificationService.getPermission());
   }, []);
 
   // Fetch preferences when authenticated
@@ -98,7 +106,7 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
           }
         }
       } catch (err) {
-        console.warn("Could not fetch remote user preferences, using local defaults:", err);
+        console.warn("Could not fetch user preferences, using local defaults:", err);
       }
     };
 
@@ -108,7 +116,6 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
     };
   }, [user, token, apiBase]);
 
-  // Toggle Mute (transient runtime action)
   const toggleMute = useCallback(() => {
     setIsMuted((prev) => {
       const next = !prev;
@@ -119,7 +126,6 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
     });
   }, []);
 
-  // Update persistent preferences via VisionGuard API
   const updatePreferences = useCallback(
     async (updates: Partial<UserPreferences>) => {
       setPreferences((prev) => ({ ...prev, ...updates }));
@@ -141,7 +147,6 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
     [token, apiBase]
   );
 
-  // Set Quiet Mode helper
   const setQuietMode = useCallback(
     async (enabled: boolean) => {
       if (enabled) {
@@ -152,7 +157,6 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
     [updatePreferences]
   );
 
-  // Set Alert Language helper
   const setAlertLanguage = useCallback(
     async (lang: "en" | "ta" | "en+ta") => {
       await updatePreferences({ alert_language: lang });
@@ -160,18 +164,20 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
     [updatePreferences]
   );
 
-  // Request browser notification permission
   const requestBrowserNotifications = useCallback(async (): Promise<boolean> => {
     const granted = await notificationService.requestPermission();
     setBrowserPermission(notificationService.getPermission());
-    if (granted) {
+    if (granted === "granted") {
       await updatePreferences({ browser_notifications_enabled: true });
       return true;
     }
     return false;
   }, [updatePreferences]);
 
-  // Acknowledge alert
+  const testBrowserNotification = useCallback((): boolean => {
+    return notificationService.showTestNotification();
+  }, []);
+
   const acknowledgeAlert = useCallback(
     async (interventionId: string) => {
       setAcknowledgedAlertIds((prev) => new Set(prev).add(interventionId));
@@ -197,15 +203,16 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
     [acknowledgedAlertIds]
   );
 
-  // Test Voice Alert
   const testVoiceAlert = useCallback(() => {
-    if (isMuted) return;
+    naturalAudioProvider.unlockAudio();
+    if (isMuted) setIsMuted(false);
+
     const lang = preferences.alert_language || "en";
     let testText = "Please adjust your sitting posture.";
     if (lang === "ta") {
-      testText = "உங்கள் அமரும் தோரணையை சரிசெய்யவும்.";
+      testText = "உங்கள் உட்காரும் தோரணையை சரிசெய்யவும்.";
     } else if (lang === "en+ta") {
-      testText = "Please adjust your sitting posture. உங்கள் அமரும் தோரணையை சரிசெய்யவும்.";
+      testText = "Please adjust your sitting posture. உங்கள் உட்காரும் தோரணையை சரிசெய்யவும்.";
     }
 
     voiceQueue.enqueue(
@@ -227,21 +234,18 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
     );
   }, [isMuted, preferences]);
 
-  // Process incoming intervention from WebSocket
   const handleIntervention = useCallback(
     (inv: Intervention) => {
       if (!inv || inv.level === "LOW" || inv.level === "UNKNOWN") {
         return;
       }
 
-      // Check delivery-level deduplication
       if (dispatchedIds.current.has(inv.intervention_id)) {
         return;
       }
       dispatchedIds.current.add(inv.intervention_id);
 
-      // 1. Voice Delivery
-      // Condition: not quiet mode, not muted, voice_alerts_enabled, valid speech
+      // Voice Delivery
       if (!preferences.quiet_mode_enabled && !isMuted && preferences.voice_alerts_enabled) {
         const priority = inv.level === "HIGH" ? "HIGH" : "NORMAL";
         const cat = (inv.category || "").toLowerCase();
@@ -270,7 +274,7 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
         );
       }
 
-      // 2. Desktop Notification Delivery
+      // Desktop Notification Delivery
       if (!preferences.quiet_mode_enabled && preferences.browser_notifications_enabled) {
         notificationService.showNotification(inv.title, { body: inv.message, category: inv.category });
       }
@@ -278,12 +282,10 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
     [isMuted, preferences]
   );
 
-  // Handle RESOLVED state
   const handleResolution = useCallback((category: string) => {
     voiceQueue.clearCategory(category);
   }, []);
 
-  // Reset all transient state on session stop
   const resetSession = useCallback(() => {
     voiceQueue.clearAll();
     notificationService.resetCooldowns();
@@ -291,7 +293,6 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
     setAcknowledgedAlertIds(new Set());
   }, []);
 
-  // Cleanup on signout
   useEffect(() => {
     if (!user) {
       voiceQueue.clearAll();
@@ -318,6 +319,7 @@ export const AlertProvider: React.FC<{ children: React.ReactNode; apiBase?: stri
     setAlertLanguage,
     updatePreferences,
     requestBrowserNotifications,
+    testBrowserNotification,
     acknowledgeAlert,
     isAcknowledged,
     testVoiceAlert,

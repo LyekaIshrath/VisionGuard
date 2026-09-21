@@ -2,7 +2,7 @@
  * VisionGuard Natural Audio Alert Provider.
  *
  * Primary provider for fixed deterministic wellness and safety alerts.
- * Plays high-quality pre-rendered neural audio assets for English (en),
+ * Plays studio-quality pre-rendered neural audio assets for English (en),
  * Tamil (ta), and sequential bilingual (en+ta).
  *
  * Rules:
@@ -22,6 +22,7 @@ export class NaturalAudioAlertProvider {
   private currentAudio: HTMLAudioElement | null = null;
   private isCurrentlyPlaying = false;
   private abortController: AbortController | null = null;
+  private isAudioUnlocked = false;
 
   isAvailable(): boolean {
     return typeof window !== "undefined" && typeof Audio !== "undefined";
@@ -29,6 +30,21 @@ export class NaturalAudioAlertProvider {
 
   isSpeaking(): boolean {
     return this.isCurrentlyPlaying;
+  }
+
+  /**
+   * Unlock audio playback context on a user gesture (e.g. Start Monitoring or Settings click).
+   */
+  unlockAudio(): void {
+    if (this.isAudioUnlocked || !this.isAvailable()) return;
+    try {
+      const silentAudio = new Audio();
+      silentAudio.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
+      silentAudio.volume = 0.01;
+      silentAudio.play().then(() => {
+        this.isAudioUnlocked = true;
+      }).catch(() => {});
+    } catch {}
   }
 
   cancel(): void {
@@ -55,8 +71,8 @@ export class NaturalAudioAlertProvider {
         return resolve(false);
       }
 
-      // Base-relative or root-relative path compatible with Vite base: './'
-      const audioUrl = `./audio/alerts/${lang}/${audioKey}.mp3`;
+      // Root-relative path resolved by Vite public server
+      const audioUrl = `/audio/alerts/${lang}/${audioKey}.mp3`;
       const audio = new Audio(audioUrl);
       this.currentAudio = audio;
       audio.volume = Math.max(0, Math.min(1, volume));
@@ -118,7 +134,6 @@ export class NaturalAudioAlertProvider {
       } else if (language === "ta") {
         return await this.playAsset("ta", audioKey, vol, signal);
       } else if (language === "en+ta") {
-        // Sequential non-overlapping playback: English first, 300ms pause, then Tamil
         const enSuccess = await this.playAsset("en", audioKey, vol, signal);
         if (signal.aborted) return false;
 

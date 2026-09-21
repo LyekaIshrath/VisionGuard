@@ -1,9 +1,14 @@
+"""VisionGuard Application Configuration.
+
+Centralized configuration for VisionGuard API, MongoDB persistence,
+and server-side authentication.
+"""
+
 import os
 import json
 from typing import Optional, Dict, Any, List
 from dotenv import load_dotenv
 
-# Automatically load environment variables from .env files
 load_dotenv()
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env"))
 
@@ -11,15 +16,14 @@ app_name = "VisionGuard API"
 app_version = "1.0.0"
 debug = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
 
-# Supabase SaaS Configuration
-SUPABASE_URL: Optional[str] = os.getenv("SUPABASE_URL")
-SUPABASE_ANON_KEY: Optional[str] = os.getenv("SUPABASE_ANON_KEY")
-SUPABASE_SERVICE_ROLE_KEY: Optional[str] = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-SUPABASE_JWT_SECRET: Optional[str] = os.getenv("SUPABASE_JWT_SECRET")
+# Database & Authentication Configuration (MongoDB)
+MONGODB_URI: str = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+MONGODB_DATABASE: str = os.getenv("MONGODB_DATABASE", "visionguard")
+JWT_SECRET: str = os.getenv("JWT_SECRET", "visionguard-secret-key-development-minimum-32-chars-long")
+JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
 
-
-# CORS - Mission 09: explicit allowlist; never wildcard in production
-# Development localhost ports safely supported without wildcard
+# CORS - Development localhost ports safely supported without wildcard
 DEV_VITE_PORTS = [5173, 5174, 5175, 5176, 5177, 5178, 5179, 4173, 4174, 4175, 8000, 3000]
 
 _CORS_ENV = os.getenv("CORS_ALLOWED_ORIGINS", "")
@@ -34,11 +38,14 @@ else:
         CORS_ALLOWED_ORIGINS.append(f"http://localhost:{port}")
         CORS_ALLOWED_ORIGINS.append(f"http://127.0.0.1:{port}")
 
+
+def is_database_configured() -> bool:
+    """Return True since MongoDB is configured as authoritative persistence."""
+    return bool(MONGODB_URI and MONGODB_DATABASE)
+
+
 def is_cloud_configured() -> bool:
-    """Return True if basic Supabase credentials are configured."""
-    url = os.getenv("SUPABASE_URL") or SUPABASE_URL
-    key = os.getenv("SUPABASE_ANON_KEY") or SUPABASE_ANON_KEY or os.getenv("SUPABASE_SERVICE_ROLE_KEY") or SUPABASE_SERVICE_ROLE_KEY
-    return bool(url and key)
+    return is_database_configured()
 
 
 def get_settings() -> Dict[str, Any]:
@@ -46,30 +53,31 @@ def get_settings() -> Dict[str, Any]:
         "app_name": app_name,
         "app_version": app_version,
         "debug": debug,
-        "cloud_configured": is_cloud_configured(),
-        "supabase_url": os.getenv("SUPABASE_URL") or SUPABASE_URL,
+        "database_configured": is_database_configured(),
+        "mongodb_uri": MONGODB_URI,
+        "mongodb_database": MONGODB_DATABASE,
     }
 
 
 class Settings:
     @property
-    def SUPABASE_URL(self) -> Optional[str]:
-        return os.getenv("SUPABASE_URL") or SUPABASE_URL
+    def MONGODB_URI(self) -> str:
+        return MONGODB_URI
 
     @property
-    def SUPABASE_ANON_KEY(self) -> Optional[str]:
-        return os.getenv("SUPABASE_ANON_KEY") or SUPABASE_ANON_KEY
+    def MONGODB_DATABASE(self) -> str:
+        return MONGODB_DATABASE
 
     @property
-    def SUPABASE_SERVICE_ROLE_KEY(self) -> Optional[str]:
-        return os.getenv("SUPABASE_SERVICE_ROLE_KEY") or SUPABASE_SERVICE_ROLE_KEY
+    def JWT_SECRET(self) -> str:
+        return JWT_SECRET
 
     @property
-    def SUPABASE_JWT_SECRET(self) -> Optional[str]:
-        return os.getenv("SUPABASE_JWT_SECRET") or SUPABASE_JWT_SECRET
+    def JWT_ALGORITHM(self) -> str:
+        return JWT_ALGORITHM
 
     @property
-    def CORS_ALLOWED_ORIGINS(self):
+    def CORS_ALLOWED_ORIGINS(self) -> List[str]:
         return CORS_ALLOWED_ORIGINS
 
     @property
@@ -86,5 +94,9 @@ class Settings:
 
     def is_cloud_configured(self) -> bool:
         return is_cloud_configured()
+
+    def is_database_configured(self) -> bool:
+        return is_database_configured()
+
 
 config = Settings()

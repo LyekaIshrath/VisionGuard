@@ -1,7 +1,13 @@
-"""VisionGuard Mission 07: Alert Orchestrator.
+"""VisionGuard Alert Orchestrator with Verified Phone SMS Delivery.
 
-Strictly downstream coordination of alert actions (in-app, browser, voice).
-Enforces anti-spam, independent cooldowns, escalation rules, and acknowledgement.
+Strictly downstream coordination of alert actions across delivery surfaces:
+1. IN-APP ALERT (InterventionBanner)
+2. DESKTOP / WINDOWS BROWSER NOTIFICATION (Native Web Notification API)
+3. SMS ALERTS (Verified phone via SmsNotificationProvider)
+4. VOICE ALERTS (Synthesized voice audio)
+
+Enforces anti-spam, independent cooldowns, escalation rules, acknowledgement,
+and granular user event preferences (posture, alertness, extended away, session complete).
 NEVER accesses camera frames or runs MediaPipe inference.
 """
 
@@ -9,7 +15,8 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Dict, List, Optional, Set
+import logging
+from typing import Dict, List, Optional, Set, Any
 from datetime import datetime, timezone
 
 from app.intelligence.risk_models import RiskCategory, RiskLevel
@@ -20,15 +27,17 @@ from app.alerts.models import (
     AlertPriority,
     EventStatus,
     RiskEvent,
+    MobilePushPayload,
 )
 from app.alerts.policy import AlertPolicyConfig, DEFAULT_ALERT_POLICY
+from app.alerts.sms_notification_provider import sms_notification_provider
+from app.alerts.mobile_push_provider import mobile_push_provider
+
+logger = logging.getLogger("visionguard.alerts")
 
 
 class AlertOrchestrator:
-    """
-    Downstream decision engine that determines channel delivery eligibility for interventions.
-    Actual execution of speech and browser notifications happens client-side in the browser.
-    """
+    """Downstream decision engine determining delivery eligibility across all channels."""
 
     def __init__(self, policy: Optional[AlertPolicyConfig] = None):
         self.policy = policy or DEFAULT_ALERT_POLICY
@@ -36,64 +45,41 @@ class AlertOrchestrator:
         # Monotonic timestamp of last dispatched alert per channel and category
         self._last_voice_time: Dict[RiskCategory, float] = {}
         self._last_notification_time: Dict[RiskCategory, float] = {}
+        self._last_sms_time: Dict[RiskCategory, float] = {}
+        self._last_mobile_push_time: Dict[RiskCategory, float] = {}
 
-        # Tracking active levels to implement escalation bypass
-        self._last_category_level: Dict[RiskCategory, RiskLevel] = {}
-
-        # Set of dispatched intervention IDs to prevent repeat delivery
-        self._dispatched_interventions: Set[str] = set()
+        # Cooldowns
+        self.sms_cooldown_sec = 120.0
+        self.mobile_cooldown_sec = 60.0
 
         # Set of acknowledged intervention IDs
         self._acknowledged_interventions: Set[str] = set()
 
-        # Currently active intervention per category
-        self._active_interventions: Dict[RiskCategory, Optional[Intervention]] = {
-            RiskCategory.POSTURE: None,
-            RiskCategory.ALERTNESS: None,
-            RiskCategory.COMBINED: None,
-            RiskCategory.SYSTEM: None,
-        }
+        # Set of intervention IDs dispatched to prevent repeat deliveries
+        self._dispatched_interventions: Set[str] = set()
 
-    def reset_session(self) -> None:
-        """Resets transient orchestrator state on monitoring start/stop/signout."""
-        self._last_voice_time.clear()
-        self._last_notification_time.clear()
-        self._last_category_level.clear()
-        self._dispatched_interventions.clear()
-        self._acknowledged_interventions.clear()
-        for k in self._active_interventions:
-            self._active_interventions[k] = None
+        # Active interventions per category
+        self._active_interventions: Dict[RiskCategory, Intervention] = {}
 
-    def acknowledge_alert(self, intervention_id: str) -> bool:
-        """
-        Records user acknowledgement of an alert.
-        Hides UI presentation without modifying physical RiskEngine state.
-        """
-        self._acknowledged_interventions.add(intervention_id)
-        return True
-
-    def is_acknowledged(self, intervention_id: str) -> bool:
-        return intervention_id in self._acknowledged_interventions
-
-    def handle_resolution(self, category: RiskCategory) -> None:
-        """
-        Clears active alert state upon event resolution.
-        Does not speak repeated recovery announcements.
-        """
-        self._active_interventions[category] = None
-        self._last_category_level[category] = RiskLevel.LOW
+        # Last evaluated risk level per category
+        self._last_category_level: Dict[RiskCategory, RiskLevel] = {}
 
     def evaluate_intervention(
         self,
         intervention: Intervention,
         voice_alerts_enabled: bool = False,
         browser_notifications_enabled: bool = False,
+        mobile_push_enabled: bool = False,
+        sms_alerts_enabled: bool = True,
         quiet_mode_enabled: bool = False,
+        notify_posture: bool = True,
+        notify_alertness: bool = True,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
         current_mono: Optional[float] = None,
     ) -> List[AlertAction]:
-        """
-        Evaluates an incoming Intervention against the policy and user preferences.
-        Returns a list of AlertAction directives for the client.
+        """Evaluates an incoming Intervention against the policy and user preferences.
+        Returns a list of AlertAction directives for the client and dispatches verified SMS.
         """
         if current_mono is None:
             current_mono = time.monotonic()
@@ -101,9 +87,15 @@ class AlertOrchestrator:
         category = intervention.category
         level = intervention.level
 
-        # UNKNOWN or LOW produce NO audible/browser alerts
+        # UNKNOWN or LOW produce NO audible/browser/sms alerts
         if level in (RiskLevel.UNKNOWN, RiskLevel.LOW):
             self.handle_resolution(category)
+            return []
+
+        # Check granular event filters
+        if category == RiskCategory.POSTURE and not notify_posture:
+            return []
+        if category == RiskCategory.ALERTNESS and not notify_alertness:
             return []
 
         # Track active intervention
@@ -129,18 +121,15 @@ class AlertOrchestrator:
                 )
             )
 
-        # In Quiet Mode, suppress VOICE and BROWSER_NOTIFICATION
+        # In Quiet Mode, suppress VOICE, BROWSER_NOTIFICATION, and SMS
         if quiet_mode_enabled:
             return actions
 
-        # 2. Check if this exact intervention_id was already delivered to voice/notification
         is_repeat_delivery = intervention.intervention_id in self._dispatched_interventions
-
-        # Escalation check: MODERATE -> HIGH bypasses cooldown once
         prev_level = self._last_category_level.get(category, RiskLevel.LOW)
         is_escalation = (prev_level == RiskLevel.MODERATE and level == RiskLevel.HIGH)
 
-        # 3. VOICE Channel evaluation
+        # 2. VOICE Channel evaluation
         if voice_alerts_enabled and (level in (RiskLevel.MODERATE, RiskLevel.HIGH)):
             if not is_repeat_delivery:
                 voice_cooldown = self.policy.get_voice_cooldown(category)
@@ -162,7 +151,7 @@ class AlertOrchestrator:
                     )
                     self._last_voice_time[category] = current_mono
 
-        # 4. BROWSER_NOTIFICATION Channel evaluation
+        # 3. BROWSER_NOTIFICATION Channel evaluation (Desktop Windows/Browser Toast)
         if browser_notifications_enabled and (level in (RiskLevel.MODERATE, RiskLevel.HIGH)):
             if not is_repeat_delivery:
                 last_notif = self._last_notification_time.get(category, 0.0)
@@ -183,11 +172,113 @@ class AlertOrchestrator:
                     )
                     self._last_notification_time[category] = current_mono
 
+        # 4. SMS Channel evaluation (Verified Phone SMS Alerts)
+        if sms_alerts_enabled and (level in (RiskLevel.MODERATE, RiskLevel.HIGH)):
+            last_sms = self._last_sms_time.get(category, 0.0)
+            time_since_sms = current_mono - last_sms
+
+            if is_escalation or (time_since_sms >= self.sms_cooldown_sec):
+                actions.append(
+                    AlertAction(
+                        alert_id=f"alert-sms-{uuid.uuid4().hex[:8]}",
+                        intervention_id=intervention.intervention_id,
+                        category=category,
+                        risk_level=level,
+                        channel=AlertChannel.SMS,
+                        message=msg,
+                        priority=priority,
+                        requires_acknowledgement=requires_ack,
+                    )
+                )
+                self._last_sms_time[category] = current_mono
+
+                if user_id:
+                    sms_notification_provider.send_alert_if_eligible(
+                        user_id=user_id,
+                        event_type=f"{category.value}_RISK_{level.value}",
+                        severity=priority.value,
+                        title=f"{category.value.capitalize()} Alert",
+                        message=msg,
+                        current_mono=current_mono,
+                    )
+
+        # 5. Mobile Push Channel evaluation (Backward compatibility)
+        if mobile_push_enabled and (level in (RiskLevel.MODERATE, RiskLevel.HIGH)):
+            last_push = self._last_mobile_push_time.get(category, 0.0)
+            time_since_push = current_mono - last_push
+            if is_escalation or (time_since_push >= self.mobile_cooldown_sec):
+                actions.append(
+                    AlertAction(
+                        alert_id=f"alert-mobile-{uuid.uuid4().hex[:8]}",
+                        intervention_id=intervention.intervention_id,
+                        category=category,
+                        risk_level=level,
+                        channel=AlertChannel.MOBILE_PUSH,
+                        message=msg,
+                        priority=priority,
+                        requires_acknowledgement=requires_ack,
+                    )
+                )
+                self._last_mobile_push_time[category] = current_mono
+
         # Update tracking state
         self._dispatched_interventions.add(intervention.intervention_id)
         self._last_category_level[category] = level
 
         return actions
+
+    def acknowledge_alert(self, intervention_id: str) -> bool:
+        """User explicit acknowledgement of high-priority alert."""
+        self._acknowledged_interventions.add(intervention_id)
+        return True
+
+    def is_acknowledged(self, intervention_id: str) -> bool:
+        """Check if an intervention has already been acknowledged by user."""
+        return intervention_id in self._acknowledged_interventions
+
+    def handle_resolution(self, category: RiskCategory) -> None:
+        """Reset escalation and active tracking upon risk resolution."""
+        self._active_interventions[category] = None
+        self._last_category_level[category] = RiskLevel.LOW
+
+    def reset_session(self) -> None:
+        """Reset session-scoped tracking states on session stop/start."""
+        self._acknowledged_interventions.clear()
+        self._dispatched_interventions.clear()
+        self._active_interventions.clear()
+        self._last_voice_time.clear()
+        self._last_notification_time.clear()
+        self._last_sms_time.clear()
+        self._last_mobile_push_time.clear()
+        self._last_category_level.clear()
+
+    def dispatch_lifecycle_event(
+        self,
+        event_type: str,
+        user_id: str,
+        title: str,
+        message: str,
+        session_id: Optional[str] = None,
+        preferences: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Dispatch lifecycle events (e.g. MONITORING_STOPPED, SESSION_REPORT_READY, PROLONGED_AWAY) via SMS."""
+        prefs = preferences or {}
+        if not prefs.get("sms_alerts_enabled", prefs.get("mobile_push_enabled", True)):
+            return {"delivered": 0, "message": "SMS alerts disabled in user preferences"}
+
+        # Event filter checks
+        if event_type in ("MONITORING_STOPPED", "SESSION_REPORT_READY") and not prefs.get("notify_session_complete", True):
+            return {"delivered": 0, "message": "Session complete notifications disabled"}
+        if event_type == "PROLONGED_AWAY" and not prefs.get("notify_extended_away", True):
+            return {"delivered": 0, "message": "Extended away notifications disabled"}
+
+        return sms_notification_provider.send_alert_if_eligible(
+            user_id=user_id,
+            event_type=event_type,
+            severity="NORMAL",
+            title=title,
+            message=message,
+        )
 
 
 # Global singleton orchestrator

@@ -1,0 +1,37 @@
+# VisionGuard Backend Dependencies
+# Environment: Python 3.13 (Windows 10/11)
+
+# Core Framework & Server
+fastapi==0.141.1
+uvicorn==0.27.1
+starlette==1.6.0
+pydantic==2.11.7
+python-multipart==0.0.20
+websockets==15.0.1
+python-dotenv==1.0.1
+
+# Computer Vision & Perception Pipeline
+opencv-python==5.0.0.93
+mediapipe==1.0.1
+numpy==2.3.1
+pillow==12.3.0
+
+# Database & Persistence (MongoDB)
+pymongo==4.18.1
+
+# Authentication & Cryptography
+bcrypt==5.0.0
+python-jose==3.5.0
+cryptography==50.0.1
+
+# Notifications, SMS & Web Push
+pywebpush==2.5.0
+py-vapid==1.9.4
+requests==2.32.4
+httpx==0.28.1
+
+# Windows Timezone Support for zoneinfo
+tzdata==2025.2
+
+# Testing Framework
+pytest==9.1.1

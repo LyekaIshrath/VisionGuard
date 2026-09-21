@@ -8,6 +8,7 @@ interface PostureCardProps {
   calibration: CalibrationStatus;
   canCalibrate: boolean;
   onOpenCalibration: () => void;
+  isRunning?: boolean;
 }
 
 export const PostureCard: React.FC<PostureCardProps> = ({
@@ -16,8 +17,12 @@ export const PostureCard: React.FC<PostureCardProps> = ({
   calibration,
   canCalibrate,
   onOpenCalibration,
+  isRunning = true,
 }) => {
   const isCalibrated = calibration.state === "COMPLETED";
+
+  const displayStatus = isRunning ? postureStatus : "NO_ACTIVE_SESSION";
+  const displayScore = isRunning && postureScore !== null ? postureScore : null;
 
   return (
     <section className="dashboard-card telemetry-card" id="posture-section" aria-label="Live Posture Analysis">
@@ -26,30 +31,30 @@ export const PostureCard: React.FC<PostureCardProps> = ({
           <h2 className="card-title">POSTURE</h2>
           <span className="card-subtitle">Normalized 2D Biomechanical Geometry</span>
         </div>
-        <StatusBadge type="posture" value={postureStatus} />
+        <StatusBadge type="posture" value={displayStatus} />
       </div>
 
       <div className="telemetry-body">
         <div className="telemetry-stat-row">
           <div className="telemetry-main-val">
             <span className="stat-label">Current Alignment</span>
-            <span className="stat-value">{postureStatus.replace(/_/g, " ")}</span>
+            <span className="stat-value">{isRunning ? postureStatus.replace(/_/g, " ") : "NO ACTIVE SESSION"}</span>
           </div>
           <div className="telemetry-score-val">
             <span className="stat-label">Posture Score</span>
             <span className="score-badge">
-              <strong>{postureScore !== null ? postureScore : "—"}</strong>
+              <strong>{displayScore !== null ? displayScore : "—"}</strong>
               <span className="score-denom">/ 100</span>
             </span>
           </div>
         </div>
 
-        {postureScore !== null && (
+        {displayScore !== null && (
           <div className="stat-progress-wrapper">
             <div className="stat-progress-bar">
               <div
                 className="stat-progress-fill good"
-                style={{ width: `${Math.max(0, Math.min(100, postureScore))}%` }}
+                style={{ width: `${Math.max(0, Math.min(100, displayScore))}%` }}
               />
             </div>
           </div>
@@ -65,7 +70,7 @@ export const PostureCard: React.FC<PostureCardProps> = ({
             ) : (
               <>
                 <span className="calib-dot warning" aria-hidden="true" />
-                <span className="calib-label">Calibration required for personal upright baseline</span>
+                <span className="calib-label">Built-in Engineering Baseline</span>
               </>
             )}
           </div>
@@ -74,7 +79,7 @@ export const PostureCard: React.FC<PostureCardProps> = ({
             disabled={!canCalibrate}
             onClick={onOpenCalibration}
           >
-            {isCalibrated ? "Recalibrate" : "Calibrate"}
+            {isCalibrated ? "Recalibrate Baseline" : "Personalize Baseline"}
           </button>
         </div>
 

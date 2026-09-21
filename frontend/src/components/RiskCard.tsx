@@ -5,17 +5,20 @@ import { StatusBadge } from "./StatusBadge";
 interface RiskCardProps {
   riskStatus: RiskStatusResponse | null;
   overallRiskLevel: RiskLevel;
+  isRunning?: boolean;
 }
 
 export const RiskCard: React.FC<RiskCardProps> = ({
   riskStatus,
   overallRiskLevel,
+  isRunning = true,
 }) => {
-  const score = riskStatus?.risk_score;
-  const pRisk = riskStatus?.posture_risk;
-  const aRisk = riskStatus?.alertness_risk;
-  const reasons = riskStatus?.active_reasons || [];
-  const dominant = riskStatus?.dominant_category;
+  const score = isRunning ? riskStatus?.risk_score : null;
+  const pRisk = isRunning ? riskStatus?.posture_risk : null;
+  const aRisk = isRunning ? riskStatus?.alertness_risk : null;
+  const reasons = isRunning ? (riskStatus?.active_reasons || []) : [];
+  const dominant = isRunning ? riskStatus?.dominant_category : null;
+  const displayLevel = isRunning ? overallRiskLevel : "NO_ACTIVE_SESSION";
 
   const formatReason = (reason: string) => {
     return reason.replace(/_/g, " ").toLowerCase();
@@ -35,13 +38,13 @@ export const RiskCard: React.FC<RiskCardProps> = ({
           <h2 className="card-title">SAFETY &amp; WELLNESS RISK</h2>
           <span className="card-subtitle">Temporal Asymmetric Hysteresis Fusion</span>
         </div>
-        <StatusBadge type="risk" value={overallRiskLevel} />
+        <StatusBadge type="risk" value={displayLevel} />
       </div>
 
       <div className="risk-body">
         <div className="risk-primary-stat">
           <div className="risk-level-display">
-            <span className="risk-level-value">{overallRiskLevel}</span>
+            <span className="risk-level-value">{isRunning ? overallRiskLevel : "NO ACTIVE SESSION"}</span>
             {dominant && (
               <span className="dominant-tag">
                 Driven by {dominant}
@@ -76,7 +79,7 @@ export const RiskCard: React.FC<RiskCardProps> = ({
               <span className="domain-desc">Duration + severity accumulation</span>
             </div>
             <div className="domain-status">
-              <StatusBadge type="risk" value={pRisk?.level || "UNKNOWN"} />
+              <StatusBadge type="risk" value={pRisk?.level || (isRunning ? "UNKNOWN" : "NO_ACTIVE_SESSION")} />
               {pRisk?.score !== null && pRisk?.score !== undefined && (
                 <span className="domain-score">{pRisk.score}</span>
               )}
@@ -89,7 +92,7 @@ export const RiskCard: React.FC<RiskCardProps> = ({
               <span className="domain-desc">Eye closure &amp; vigilance signals</span>
             </div>
             <div className="domain-status">
-              <StatusBadge type="risk" value={aRisk?.level || "UNKNOWN"} />
+              <StatusBadge type="risk" value={aRisk?.level || (isRunning ? "UNKNOWN" : "NO_ACTIVE_SESSION")} />
               {aRisk?.score !== null && aRisk?.score !== undefined && (
                 <span className="domain-score">{aRisk.score}</span>
               )}
@@ -100,7 +103,9 @@ export const RiskCard: React.FC<RiskCardProps> = ({
         <div className="active-signals-section">
           <span className="signals-title">ACTIVE SIGNALS</span>
           <div className="signals-chips">
-            {reasons.length === 0 ? (
+            {!isRunning ? (
+              <span className="signal-chip chip-normal">No active session</span>
+            ) : reasons.length === 0 ? (
               <span className="signal-chip chip-normal">No active risk signals</span>
             ) : (
               reasons.map((r, i) => (

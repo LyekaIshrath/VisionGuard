@@ -9,6 +9,7 @@ interface AlertnessCardProps {
   calibration: AlertnessCalibrationStatus;
   canCalibrate: boolean;
   onOpenCalibration: () => void;
+  isRunning?: boolean;
 }
 
 export const AlertnessCard: React.FC<AlertnessCardProps> = ({
@@ -18,11 +19,14 @@ export const AlertnessCard: React.FC<AlertnessCardProps> = ({
   calibration,
   canCalibrate,
   onOpenCalibration,
+  isRunning = true,
 }) => {
   const isCalibrated = calibration.state === "COMPLETED";
-  const closureSec = humanState.eye_closure_duration;
-  const blinkRate = humanState.blink_rate;
-  const yawnActive = (humanState.yawn_score || 0) > 0;
+  const closureSec = isRunning ? humanState.eye_closure_duration : null;
+  const blinkRate = isRunning ? humanState.blink_rate : null;
+  const yawnActive = isRunning && (humanState.yawn_score || 0) > 0;
+  const displayStatus = isRunning ? alertnessStatus : "NO_ACTIVE_SESSION";
+  const displayScore = isRunning && alertnessScore !== null ? alertnessScore : null;
 
   return (
     <section className="dashboard-card telemetry-card" id="alertness-section" aria-label="Alertness and Drowsiness Intelligence">
@@ -31,30 +35,30 @@ export const AlertnessCard: React.FC<AlertnessCardProps> = ({
           <h2 className="card-title">ALERTNESS</h2>
           <span className="card-subtitle">Multimodal Vigilance &amp; Eye Dynamics</span>
         </div>
-        <StatusBadge type="alertness" value={alertnessStatus} />
+        <StatusBadge type="alertness" value={displayStatus} />
       </div>
 
       <div className="telemetry-body">
         <div className="telemetry-stat-row">
           <div className="telemetry-main-val">
             <span className="stat-label">Vigilance State</span>
-            <span className="stat-value">{alertnessStatus.replace(/_/g, " ")}</span>
+            <span className="stat-value">{isRunning ? alertnessStatus.replace(/_/g, " ") : "NO ACTIVE SESSION"}</span>
           </div>
           <div className="telemetry-score-val">
             <span className="stat-label">Alertness Score</span>
             <span className="score-badge">
-              <strong>{alertnessScore !== null ? alertnessScore : "—"}</strong>
+              <strong>{displayScore !== null ? displayScore : "—"}</strong>
               <span className="score-denom">/ 100</span>
             </span>
           </div>
         </div>
 
-        {alertnessScore !== null && (
+        {displayScore !== null && (
           <div className="stat-progress-wrapper">
             <div className="stat-progress-bar">
               <div
                 className="stat-progress-fill good"
-                style={{ width: `${Math.max(0, Math.min(100, alertnessScore))}%` }}
+                style={{ width: `${Math.max(0, Math.min(100, displayScore))}%` }}
               />
             </div>
           </div>
@@ -63,26 +67,26 @@ export const AlertnessCard: React.FC<AlertnessCardProps> = ({
         <div className="telemetry-grid-2x2">
           <div className="metric-box">
             <span className="metric-box-label">Eyes</span>
-            <span className={`metric-box-val ${humanState.eye_state === "CLOSED" ? "warning" : ""}`}>
-              {humanState.eye_state || "UNKNOWN"}
+            <span className={`metric-box-val ${isRunning && humanState.eye_state === "CLOSED" ? "warning" : ""}`}>
+              {isRunning ? (humanState.eye_state || "UNKNOWN") : "—"}
             </span>
           </div>
           <div className="metric-box">
             <span className="metric-box-label">Closure</span>
-            <span className={`metric-box-val ${(closureSec || 0) >= 1.5 ? "warning" : ""}`}>
-              {closureSec !== null && closureSec !== undefined ? `${closureSec.toFixed(1)} s` : "0.0 s"}
+            <span className={`metric-box-val ${isRunning && (closureSec || 0) >= 1.5 ? "warning" : ""}`}>
+              {isRunning && closureSec !== null && closureSec !== undefined ? `${closureSec.toFixed(1)} s` : "—"}
             </span>
           </div>
           <div className="metric-box">
             <span className="metric-box-label">Blink Rate</span>
             <span className="metric-box-val">
-              {blinkRate !== null && blinkRate !== undefined ? `${blinkRate} / min` : "Collecting..."}
+              {isRunning && blinkRate !== null && blinkRate !== undefined ? `${blinkRate} / min` : "—"}
             </span>
           </div>
           <div className="metric-box">
             <span className="metric-box-label">Yawn Signal</span>
             <span className={`metric-box-val ${yawnActive ? "warning" : ""}`}>
-              {yawnActive ? "Active" : "None"}
+              {isRunning ? (yawnActive ? "Active" : "None") : "—"}
             </span>
           </div>
         </div>
@@ -97,7 +101,7 @@ export const AlertnessCard: React.FC<AlertnessCardProps> = ({
             ) : (
               <>
                 <span className="calib-dot warning" aria-hidden="true" />
-                <span className="calib-label">Calibration required for personal eye openness</span>
+                <span className="calib-label">Built-in Engineering Baseline</span>
               </>
             )}
           </div>
@@ -106,7 +110,7 @@ export const AlertnessCard: React.FC<AlertnessCardProps> = ({
             disabled={!canCalibrate}
             onClick={onOpenCalibration}
           >
-            {isCalibrated ? "Recalibrate" : "Calibrate"}
+            {isCalibrated ? "Recalibrate Baseline" : "Personalize Baseline"}
           </button>
         </div>
 

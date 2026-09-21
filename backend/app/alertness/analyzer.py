@@ -39,6 +39,12 @@ class AlertnessAnalysisResult:
     evidence_score: float
     confidence: float
     debug_metrics: Dict[str, Any] = field(default_factory=dict)
+    blink_count: int = 0
+    longest_eye_closure: float = 0.0
+    valid_eye_tracking_seconds: float = 0.0
+    ear: Optional[float] = None
+    closed_eye_threshold: Optional[float] = None
+    is_blink_candidate: bool = False
 
 
 class AlertnessAnalyzer:
@@ -56,9 +62,13 @@ class AlertnessAnalyzer:
         # Eye closure
         self._eye_closure_started_at: Optional[float] = None
         self._current_closure_duration: float = 0.0
+        self._is_blink_candidate: bool = False
 
         # Blinks
         self._blink_timestamps: Deque[float] = deque()
+        self._total_blink_count: int = 0
+        self._longest_eye_closure: float = 0.0
+        self.candidate_history: Deque[Dict[str, Any]] = deque(maxlen=100)
 
         # PERCLOS rolling intervals: deque of (timestamp, duration_sec, is_closed)
         self._perclos_intervals: Deque[Tuple[float, float, bool]] = deque()
@@ -80,6 +90,16 @@ class AlertnessAnalyzer:
     def is_calibrated(self) -> bool:
         return self._baseline is not None
 
+    def _record_candidate(self, duration: float, accepted: bool, reason: str) -> None:
+        if not hasattr(self, "candidate_history"):
+            self.candidate_history = deque(maxlen=100)
+        self.candidate_history.append({
+            "timestamp": time.time(),
+            "duration": round(duration, 4),
+            "accepted": accepted,
+            "reason": reason,
+        })
+
     def set_baseline(self, baseline: Optional[AlertnessBaseline]) -> None:
         """Set or update the active personalized baseline."""
         self._baseline = baseline
@@ -93,6 +113,9 @@ class AlertnessAnalyzer:
         self._eye_closure_started_at = None
         self._current_closure_duration = 0.0
         self._blink_timestamps.clear()
+        self._total_blink_count = 0
+        self._longest_eye_closure = 0.0
+        self._is_blink_candidate = False
         self._perclos_intervals.clear()
         self._mouth_open_started_at = None
         self._yawn_active = False
@@ -125,12 +148,22 @@ class AlertnessAnalyzer:
                 evidence_score=0.0,
                 confidence=0.0,
                 debug_metrics={"reason": "not_calibrated"},
+                blink_count=self._total_blink_count,
+                longest_eye_closure=self._longest_eye_closure,
+                valid_eye_tracking_seconds=round(self._valid_observation_sec, 1),
+                ear=None,
+                closed_eye_threshold=self._baseline.closed_eye_threshold if self._baseline else None,
+                is_blink_candidate=False,
             )
 
         # Missing or invalid face guard
         if geometry is None or not geometry.is_valid or geometry.combined_ear is None:
-            # Freeze timers and return UNKNOWN
+            if self._is_blink_candidate and self._eye_closure_started_at is not None:
+                duration = now - self._eye_closure_started_at
+                self._record_candidate(duration, accepted=False, reason="cancelled_by_tracking_loss")
+            # Freeze timers and return UNKNOWN (tracking loss cancels pending candidate)
             self._eye_closure_started_at = None
+            self._is_blink_candidate = False
             self._mouth_open_started_at = None
             self._head_drop_started_at = None
             self._evidence_entry_started_at = None
@@ -150,6 +183,12 @@ class AlertnessAnalyzer:
                 evidence_score=0.0,
                 confidence=0.0,
                 debug_metrics={"reason": "face_missing_or_invalid"},
+                blink_count=self._total_blink_count,
+                longest_eye_closure=self._longest_eye_closure,
+                valid_eye_tracking_seconds=round(self._valid_observation_sec, 1),
+                ear=None,
+                closed_eye_threshold=self._baseline.closed_eye_threshold if self._baseline else None,
+                is_blink_candidate=False,
             )
 
         # Delta time calculation
@@ -162,22 +201,46 @@ class AlertnessAnalyzer:
 
         # --- 1. Eye State & Closure Timing ---
         combined_ear = geometry.combined_ear
-        is_closed = combined_ear < self._baseline.closed_eye_threshold
+        closed_thresh = self._baseline.closed_eye_threshold
+        is_closed = combined_ear < closed_thresh
 
         if is_closed:
             eye_state = "CLOSED"
             if self._eye_closure_started_at is None:
                 self._eye_closure_started_at = now
+                self._is_blink_candidate = True
+
             self._current_closure_duration = now - self._eye_closure_started_at
+            if self._current_closure_duration > self._config.blink_max_duration_sec:
+                # Sustained closure is not a normal transient blink
+                if self._is_blink_candidate:
+                    self._record_candidate(self._current_closure_duration, accepted=False, reason="sustained_closure_exceeded_max")
+                self._is_blink_candidate = False
+
+            if self._current_closure_duration > self._longest_eye_closure:
+                self._longest_eye_closure = round(self._current_closure_duration, 2)
             self._continuous_open_started_at = None
         else:
             eye_state = "OPEN"
             if self._eye_closure_started_at is not None:
                 closed_dur = now - self._eye_closure_started_at
                 self._eye_closure_started_at = None
-                # Check normal blink
-                if self._config.blink_min_duration_sec <= closed_dur <= self._config.blink_max_duration_sec:
-                    self._blink_timestamps.append(now)
+                if closed_dur > self._longest_eye_closure:
+                    self._longest_eye_closure = round(closed_dur, 2)
+                # Increment blink exactly once if candidate and within valid blink bounds
+                if self._is_blink_candidate:
+                    if closed_dur < self._config.blink_min_duration_sec:
+                        self._record_candidate(closed_dur, accepted=False, reason="too_short")
+                    elif closed_dur > self._config.blink_max_duration_sec:
+                        self._record_candidate(closed_dur, accepted=False, reason="too_long")
+                    else:
+                        self._blink_timestamps.append(now)
+                        self._total_blink_count += 1
+                        self._record_candidate(closed_dur, accepted=True, reason="valid_blink")
+                else:
+                    self._record_candidate(closed_dur, accepted=False, reason="candidate_previously_invalidated")
+                self._is_blink_candidate = False
+
             self._current_closure_duration = 0.0
             if self._continuous_open_started_at is None:
                 self._continuous_open_started_at = now
@@ -326,4 +389,10 @@ class AlertnessAnalyzer:
             evidence_score=fused_evidence,
             confidence=round(confidence, 2),
             debug_metrics=debug_metrics,
+            blink_count=self._total_blink_count,
+            longest_eye_closure=self._longest_eye_closure,
+            valid_eye_tracking_seconds=round(self._valid_observation_sec, 1),
+            ear=combined_ear,
+            closed_eye_threshold=closed_thresh,
+            is_blink_candidate=self._is_blink_candidate,
         )

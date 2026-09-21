@@ -39,16 +39,16 @@ export const CloudSyncPill: React.FC<CloudSyncPillProps> = ({ apiBase }) => {
   const getPillConfig = (status: CloudSyncStatus) => {
     switch (status) {
       case "SYNCED":
-        return { dotClass: "cloud-dot synced", text: "Cloud: Synced", badgeClass: "badge-synced" };
+        return { dotClass: "cloud-dot synced", text: "Data: Synced", badgeClass: "badge-synced" };
       case "SYNCING":
         return { dotClass: "cloud-dot syncing", text: "Syncing...", badgeClass: "badge-syncing" };
       case "OFFLINE":
-        return { dotClass: "cloud-dot offline", text: "Cloud: Offline", badgeClass: "badge-offline" };
+        return { dotClass: "cloud-dot offline", text: "Data: Offline", badgeClass: "badge-offline" };
       case "ERROR":
-        return { dotClass: "cloud-dot error", text: "Cloud: Error", badgeClass: "badge-error" };
+        return { dotClass: "cloud-dot error", text: "Data: Error", badgeClass: "badge-error" };
       case "DISABLED":
       default:
-        return { dotClass: "cloud-dot disabled", text: "Cloud: Local Only", badgeClass: "badge-disabled" };
+        return { dotClass: "cloud-dot disabled", text: "Data: Local Only", badgeClass: "badge-disabled" };
     }
   };
 
@@ -58,7 +58,7 @@ export const CloudSyncPill: React.FC<CloudSyncPillProps> = ({ apiBase }) => {
     <div
       className={`cloud-sync-pill ${config.badgeClass}`}
       title={statusInfo.message}
-      aria-label={`Cloud status: ${statusInfo.status}`}
+      aria-label={`Data status: ${statusInfo.status}`}
     >
       <span className={config.dotClass} />
       <span className="cloud-sync-text">{config.text}</span>

@@ -1,78 +1,565 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { useAlerts } from "../contexts/AlertContext";
+import { useAuth } from "../contexts/AuthContext";
+import { apiFetch } from "../services/apiClient";
 
-export const SettingsView: React.FC = () => {
+interface SettingsViewProps {
+  apiBase?: string;
+  onOpenPostureCalibration?: () => void;
+  onOpenAlertnessCalibration?: () => void;
+  canCalibratePosture?: boolean;
+  canCalibrateAlertness?: boolean;
+  postureCalibrated?: boolean;
+  alertnessCalibrated?: boolean;
+}
+
+export const SettingsView: React.FC<SettingsViewProps> = ({
+  apiBase = "",
+  onOpenPostureCalibration,
+  onOpenAlertnessCalibration,
+  canCalibratePosture = true,
+  canCalibrateAlertness = true,
+  postureCalibrated = false,
+  alertnessCalibrated = false,
+}) => {
   const {
     isMuted,
     quietModeEnabled,
     voiceAlertsEnabled,
-    voiceVolume,
-    voiceRate,
-    voicePitch,
-    selectedVoice,
     alertLanguage,
     setAlertLanguage,
     browserNotificationsEnabled,
     browserPermission,
-    availableVoices,
     toggleMute,
     setQuietMode,
     updatePreferences,
     requestBrowserNotifications,
+    testBrowserNotification,
     testVoiceAlert,
   } = useAlerts();
 
+  const { user, startPhoneChange, verifyPhoneChange, refreshUser } = useAuth();
+
+  // Multi-Surface Notification Preferences State
+  const [smsAlertsEnabled, setSmsAlertsEnabled] = useState<boolean>(true);
+  const [notifyPosture, setNotifyPosture] = useState<boolean>(true);
+  const [notifyAlertness, setNotifyAlertness] = useState<boolean>(true);
+  const [notifyExtendedAway, setNotifyExtendedAway] = useState<boolean>(true);
+  const [notifySessionComplete, setNotifySessionComplete] = useState<boolean>(true);
+
+  // Testing Feedback States
+  const [testDesktopFeedback, setTestDesktopFeedback] = useState<string | null>(null);
+  const [testSmsFeedback, setTestSmsFeedback] = useState<string | null>(null);
+  const [testVoiceFeedback, setTestVoiceFeedback] = useState<string | null>(null);
+  const [isSendingTestSms, setIsSendingTestSms] = useState<boolean>(false);
+
+  // Phone Change Modal / Flow State
+  const [isChangingPhone, setIsChangingPhone] = useState<boolean>(false);
+  const [changeStep, setChangeStep] = useState<"INPUT" | "OTP">("INPUT");
+  const [newPhoneNumber, setNewPhoneNumber] = useState<string>("");
+  const [otpCode, setOtpCode] = useState<string>("");
+  const [phoneChangeError, setPhoneChangeError] = useState<string | null>(null);
+  const [phoneChangeSuccess, setPhoneChangeSuccess] = useState<string | null>(null);
+  const [phoneChangeLoading, setPhoneChangeLoading] = useState<boolean>(false);
+
+  // Load preferences on mount
+  useEffect(() => {
+    let isMounted = true;
+    const fetchPrefs = async () => {
+      try {
+        const resp = await apiFetch(`${apiBase}/api/v1/user/preferences`);
+        if (resp.ok) {
+          const data = await resp.json();
+          if (isMounted) {
+            if (data.sms_alerts_enabled !== undefined) setSmsAlertsEnabled(data.sms_alerts_enabled);
+            if (data.notify_posture !== undefined) setNotifyPosture(data.notify_posture);
+            if (data.notify_alertness !== undefined) setNotifyAlertness(data.notify_alertness);
+            if (data.notify_extended_away !== undefined) setNotifyExtendedAway(data.notify_extended_away);
+            if (data.notify_session_complete !== undefined) setNotifySessionComplete(data.notify_session_complete);
+          }
+        }
+      } catch {
+        // Fallback to local defaults safely without breaking UI
+      }
+    };
+    fetchPrefs();
+    return () => {
+      isMounted = false;
+    };
+  }, [apiBase]);
+
+  const handleToggleSms = async (enabled: boolean) => {
+    setSmsAlertsEnabled(enabled);
+    await updatePreferences({ sms_alerts_enabled: enabled });
+  };
+
+  const handleToggleEventFilter = async (
+    key: "notify_posture" | "notify_alertness" | "notify_extended_away" | "notify_session_complete",
+    val: boolean
+  ) => {
+    if (key === "notify_posture") setNotifyPosture(val);
+    if (key === "notify_alertness") setNotifyAlertness(val);
+    if (key === "notify_extended_away") setNotifyExtendedAway(val);
+    if (key === "notify_session_complete") setNotifySessionComplete(val);
+    await updatePreferences({ [key]: val });
+  };
+
+  // Test Handlers
+  const handleTestDesktop = async () => {
+    setTestDesktopFeedback(null);
+    if (browserPermission !== "granted") {
+      const granted = await requestBrowserNotifications();
+      if (!granted) {
+        setTestDesktopFeedback("Permission denied by browser.");
+        return;
+      }
+    }
+    const sent = testBrowserNotification();
+    if (sent) {
+      setTestDesktopFeedback("Desktop notification sent.");
+      try {
+        await apiFetch(`${apiBase}/api/v1/notifications/test-desktop`, { method: "POST" });
+      } catch {}
+    } else {
+      setTestDesktopFeedback("Failed to display desktop alert.");
+    }
+    setTimeout(() => setTestDesktopFeedback(null), 4000);
+  };
+
+  const handleTestSms = async () => {
+    setTestSmsFeedback(null);
+    setIsSendingTestSms(true);
+    try {
+      const resp = await apiFetch(`${apiBase}/api/v1/notifications/test-sms`, { method: "POST" });
+      const data = await resp.json();
+      if (resp.ok) {
+        setTestSmsFeedback(`SMS dispatched to ${data.delivery_summary?.recipient || "your verified phone"}.`);
+      } else {
+        setTestSmsFeedback(data.detail || "Failed to send test SMS.");
+      }
+    } catch (err: any) {
+      setTestSmsFeedback(err.message || "Network error sending test SMS.");
+    } finally {
+      setIsSendingTestSms(false);
+      setTimeout(() => setTestSmsFeedback(null), 6000);
+    }
+  };
+
+  const handleTestVoice = () => {
+    setTestVoiceFeedback("Playing voice alert test...");
+    testVoiceAlert();
+    setTimeout(() => setTestVoiceFeedback(null), 4000);
+  };
+
+  // Phone Change Handlers
+  const handleStartPhoneChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPhoneChangeError(null);
+    setPhoneChangeSuccess(null);
+
+    if (!newPhoneNumber.trim()) {
+      setPhoneChangeError("Please enter your new mobile number.");
+      return;
+    }
+
+    setPhoneChangeLoading(true);
+    try {
+      const { error } = await startPhoneChange(newPhoneNumber.trim());
+      if (error) {
+        setPhoneChangeError(error.message);
+      } else {
+        setPhoneChangeSuccess("Verification code sent to new mobile number.");
+        setChangeStep("OTP");
+      }
+    } finally {
+      setPhoneChangeLoading(false);
+    }
+  };
+
+  const handleVerifyPhoneChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPhoneChangeError(null);
+    setPhoneChangeSuccess(null);
+
+    if (!otpCode.trim() || otpCode.trim().length < 4) {
+      setPhoneChangeError("Please enter the verification code.");
+      return;
+    }
+
+    setPhoneChangeLoading(true);
+    try {
+      const { error } = await verifyPhoneChange(newPhoneNumber.trim(), otpCode.trim());
+      if (error) {
+        setPhoneChangeError(error.message);
+      } else {
+        setPhoneChangeSuccess("Phone number successfully updated and verified!");
+        await refreshUser();
+        setTimeout(() => {
+          setIsChangingPhone(false);
+          setChangeStep("INPUT");
+          setNewPhoneNumber("");
+          setOtpCode("");
+          setPhoneChangeSuccess(null);
+        }, 1200);
+      }
+    } finally {
+      setPhoneChangeLoading(false);
+    }
+  };
+
   return (
-    <div className="view-container settings-view" id="settings-section">
-      <div className="view-header">
-        <div>
-          <h2 className="view-title">Alert &amp; Voice Settings</h2>
-          <p className="view-subtitle">
-            Configure how VisionGuard warns you about posture and alertness risks.
-          </p>
+    <div className="settings-container" id="settings-section">
+      <div className="settings-header">
+        <h1 className="settings-title">SETTINGS</h1>
+        <p className="settings-subtitle">
+          Configure safety notifications, workstation audio, verified channels, and personalized baselines.
+        </p>
+      </div>
+
+      {/* 1. GENERAL / ACCOUNT / VERIFIED PHONE */}
+      <div className="dashboard-card settings-card">
+        <div className="card-header">
+          <div className="card-title-group">
+            <h2 className="card-title">ACCOUNT &amp; VERIFIED PHONE</h2>
+            <span className="card-subtitle">Identity &amp; Multi-Surface SMS Gateway</span>
+          </div>
+          {user ? (
+            user.phone_verified ? (
+              <span className="status-badge badge-good">
+                <span className="badge-dot" />
+                <span>PHONE VERIFIED</span>
+              </span>
+            ) : (
+              <span className="status-badge badge-warning">
+                <span className="badge-dot" />
+                <span>UNVERIFIED PHONE</span>
+              </span>
+            )
+          ) : (
+            <span className="status-badge badge-unknown">
+              <span className="badge-dot" />
+              <span>GUEST / LOCAL USER</span>
+            </span>
+          )}
+        </div>
+
+        <div className="settings-card-body">
+          <div className="phone-status-row">
+            <div>
+              <span className="stat-label">Linked Mobile Number</span>
+              <p className="phone-number-display">
+                {user?.phone_masked || (user?.phone_number ? user.phone_number : "No mobile number linked")}
+              </p>
+              <p className="card-helper-text">
+                Critical posture, alertness, and session summary alerts are delivered directly to this phone via SMS.
+              </p>
+            </div>
+
+            {user ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  setIsChangingPhone(!isChangingPhone);
+                  setChangeStep("INPUT");
+                  setPhoneChangeError(null);
+                  setPhoneChangeSuccess(null);
+                }}
+              >
+                {isChangingPhone ? "Cancel" : "Change Phone Number"}
+              </button>
+            ) : (
+              <p className="signin-notice-text">
+                Sign in to link a verified mobile number for remote SMS alerts.
+              </p>
+            )}
+          </div>
+
+          {/* Inline Phone Change Form */}
+          {isChangingPhone && (
+            <div className="phone-change-box">
+              {phoneChangeError && (
+                <div className="auth-banner auth-banner-error">
+                  <span>{phoneChangeError}</span>
+                </div>
+              )}
+              {phoneChangeSuccess && (
+                <div className="auth-banner auth-banner-success">
+                  <span>{phoneChangeSuccess}</span>
+                </div>
+              )}
+
+              {changeStep === "INPUT" ? (
+                <form onSubmit={handleStartPhoneChange} className="phone-form">
+                  <div className="form-group" style={{ flex: "1 1 240px" }}>
+                    <label className="form-label">New Mobile Number (E.164 format, e.g. +919876543210)</label>
+                    <input
+                      type="tel"
+                      className="form-input"
+                      placeholder="+919876543210"
+                      value={newPhoneNumber}
+                      onChange={(e) => setNewPhoneNumber(e.target.value)}
+                      disabled={phoneChangeLoading}
+                      required
+                    />
+                  </div>
+                  <button type="submit" className="btn btn-primary btn-sm" disabled={phoneChangeLoading}>
+                    {phoneChangeLoading ? "Sending OTP..." : "Send Verification Code"}
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={handleVerifyPhoneChange} className="phone-form">
+                  <div className="form-group" style={{ flex: "1 1 200px" }}>
+                    <label className="form-label">Enter 6-Digit OTP Code</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="123456"
+                      value={otpCode}
+                      onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      disabled={phoneChangeLoading}
+                      autoFocus
+                      required
+                    />
+                  </div>
+                  <button type="submit" className="btn btn-primary btn-sm" disabled={phoneChangeLoading || otpCode.length < 4}>
+                    {phoneChangeLoading ? "Verifying..." : "Verify & Save Phone"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setChangeStep("INPUT")}
+                    disabled={phoneChangeLoading}
+                  >
+                    Back
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="settings-grid">
-        {/* Quick Controls Card */}
-        <section className="dashboard-card settings-card" aria-labelledby="quick-controls-heading">
-          <div className="card-header">
-            <h3 id="quick-controls-heading" className="card-title">Quick Controls</h3>
+      {/* 2. NOTIFICATIONS (DELIVERY CHANNELS) */}
+      <div className="dashboard-card settings-card">
+        <div className="card-header">
+          <div className="card-title-group">
+            <h2 className="card-title">DELIVERY SURFACES</h2>
+            <span className="card-subtitle">Multi-Channel Alert Dispatches</span>
           </div>
-          <div className="settings-options-list">
-            <div className="setting-item">
-              <div className="setting-info">
-                <span className="setting-label">Audio Mute</span>
-                <span className="setting-desc">
-                  Immediately silence current and pending voice alerts without altering your permanent preferences.
-                </span>
+        </div>
+
+        <div className="settings-card-body">
+          <div className="settings-toggles-grid">
+            {/* Desktop Notification Toggle */}
+            <div className="settings-toggle-item">
+              <div className="settings-toggle-info">
+                <span className="settings-toggle-label">Desktop Notifications</span>
+                <span className="settings-toggle-desc">Windows and browser native alert banners.</span>
               </div>
+              <label className="toggle-switch">
+                <input
+                  type="checkbox"
+                  checked={browserNotificationsEnabled}
+                  onChange={(e) => updatePreferences({ browser_notifications_enabled: e.target.checked })}
+                />
+                <span className="slider round" />
+              </label>
+            </div>
+
+            {/* SMS Alerts Toggle */}
+            <div className="settings-toggle-item">
+              <div className="settings-toggle-info">
+                <span className="settings-toggle-label">SMS Alerts</span>
+                <span className="settings-toggle-desc">Direct text messages to verified mobile phone.</span>
+              </div>
+              <label className="toggle-switch">
+                <input
+                  type="checkbox"
+                  checked={smsAlertsEnabled}
+                  onChange={(e) => handleToggleSms(e.target.checked)}
+                />
+                <span className="slider round" />
+              </label>
+            </div>
+
+            {/* Voice Alerts Toggle */}
+            <div className="settings-toggle-item">
+              <div className="settings-toggle-info">
+                <span className="settings-toggle-label">Voice Alerts</span>
+                <span className="settings-toggle-desc">Spoken audio alerts via workstation speakers.</span>
+              </div>
+              <label className="toggle-switch">
+                <input
+                  type="checkbox"
+                  checked={voiceAlertsEnabled && !isMuted}
+                  onChange={toggleMute}
+                />
+                <span className="slider round" />
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. EVENT FILTERS */}
+      <div className="dashboard-card settings-card">
+        <div className="card-header">
+          <div className="card-title-group">
+            <h2 className="card-title">EVENT FILTERS</h2>
+            <span className="card-subtitle">Ergonomic &amp; Safety Alert Triggers</span>
+          </div>
+        </div>
+
+        <div className="settings-card-body">
+          <div className="settings-toggles-grid">
+            <div className="settings-toggle-item">
+              <div className="settings-toggle-info">
+                <span className="settings-toggle-label">Posture Alerts</span>
+                <span className="settings-toggle-desc">Sustained slouching or forward head tilt.</span>
+              </div>
+              <label className="toggle-switch">
+                <input
+                  type="checkbox"
+                  checked={notifyPosture}
+                  onChange={(e) => handleToggleEventFilter("notify_posture", e.target.checked)}
+                />
+                <span className="slider round" />
+              </label>
+            </div>
+
+            <div className="settings-toggle-item">
+              <div className="settings-toggle-info">
+                <span className="settings-toggle-label">Alertness Alerts</span>
+                <span className="settings-toggle-desc">Prolonged eye closure or drowsiness signals.</span>
+              </div>
+              <label className="toggle-switch">
+                <input
+                  type="checkbox"
+                  checked={notifyAlertness}
+                  onChange={(e) => handleToggleEventFilter("notify_alertness", e.target.checked)}
+                />
+                <span className="slider round" />
+              </label>
+            </div>
+
+            <div className="settings-toggle-item">
+              <div className="settings-toggle-info">
+                <span className="settings-toggle-label">Extended Away</span>
+                <span className="settings-toggle-desc">Notifications when absent beyond threshold.</span>
+              </div>
+              <label className="toggle-switch">
+                <input
+                  type="checkbox"
+                  checked={notifyExtendedAway}
+                  onChange={(e) => handleToggleEventFilter("notify_extended_away", e.target.checked)}
+                />
+                <span className="slider round" />
+              </label>
+            </div>
+
+            <div className="settings-toggle-item">
+              <div className="settings-toggle-info">
+                <span className="settings-toggle-label">Session Complete</span>
+                <span className="settings-toggle-desc">Session completion and summary report ready.</span>
+              </div>
+              <label className="toggle-switch">
+                <input
+                  type="checkbox"
+                  checked={notifySessionComplete}
+                  onChange={(e) => handleToggleEventFilter("notify_session_complete", e.target.checked)}
+                />
+                <span className="slider round" />
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 4. CHANNEL VERIFICATION TESTING */}
+      <div className="dashboard-card settings-card">
+        <div className="card-header">
+          <div className="card-title-group">
+            <h2 className="card-title">CHANNEL VERIFICATION TESTING</h2>
+            <span className="card-subtitle">Test Delivery Paths to Confirm Reliability</span>
+          </div>
+        </div>
+
+        <div className="settings-card-body">
+          <div className="test-buttons-row">
+            <div className="test-action-item">
               <button
-                className={`btn btn-sm ${isMuted ? "btn-danger" : "btn-secondary"}`}
-                onClick={toggleMute}
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleTestDesktop}
               >
-                {isMuted ? "Unmute Voice" : "Mute Voice"}
+                TEST DESKTOP
               </button>
+              {testDesktopFeedback && (
+                <p className="test-feedback-text info">{testDesktopFeedback}</p>
+              )}
             </div>
 
-            <div className="setting-item">
-              <div className="setting-info">
-                <span className="setting-label">Ergonomic Timezone</span>
-                <span className="setting-desc">
-                  Used to split daily metrics and time-of-day exposure. Defaults to your browser detection when unsaved.
-                </span>
-              </div>
-              <div className="tz-select-group">
-                <span className="badge badge-secondary">{Intl.DateTimeFormat().resolvedOptions().timeZone}</span>
-              </div>
+            <div className="test-action-item">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleTestSms}
+                disabled={isSendingTestSms || !user?.phone_verified}
+              >
+                {isSendingTestSms ? "SENDING SMS..." : "TEST SMS"}
+              </button>
+              {testSmsFeedback && (
+                <p className={`test-feedback-text ${testSmsFeedback.includes("dispatched") ? "success" : "danger"}`}>
+                  {testSmsFeedback}
+                </p>
+              )}
             </div>
 
-            <div className="setting-item">
-              <div className="setting-info">
-                <span className="setting-label">Quiet Mode</span>
-                <span className="setting-desc">
-                  Suppresses all spoken alerts and desktop notifications while continuing active monitoring and in-app indicators.
-                </span>
+            <div className="test-action-item">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleTestVoice}
+              >
+                TEST VOICE
+              </button>
+              {testVoiceFeedback && (
+                <p className="test-feedback-text info">{testVoiceFeedback}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 5. VOICE ALERT TUNING */}
+      <div className="dashboard-card settings-card">
+        <div className="card-header">
+          <div className="card-title-group">
+            <h2 className="card-title">VOICE ALERT TUNING</h2>
+            <span className="card-subtitle">Speech Synthesis &amp; Quiet Mode Controls</span>
+          </div>
+        </div>
+
+        <div className="settings-card-body">
+          <div className="settings-toggles-grid">
+            <div className="form-group">
+              <label className="form-label">Spoken Alert Language</label>
+              <select
+                className="form-input"
+                value={alertLanguage}
+                onChange={(e) => setAlertLanguage(e.target.value as any)}
+              >
+                <option value="en">English (US/UK)</option>
+                <option value="ta">Tamil (தமிழ்)</option>
+                <option value="en+ta">Bilingual (English + Tamil)</option>
+              </select>
+            </div>
+
+            <div className="settings-toggle-item">
+              <div className="settings-toggle-info">
+                <span className="settings-toggle-label">Master Quiet Mode</span>
+                <span className="settings-toggle-desc">{quietModeEnabled ? "Muted (visual only alerts)" : "Active audio alerts"}</span>
               </div>
               <label className="toggle-switch">
                 <input
@@ -84,207 +571,76 @@ export const SettingsView: React.FC = () => {
               </label>
             </div>
           </div>
-        </section>
+        </div>
+      </div>
 
-        {/* Voice Alerts Card */}
-        <section className="dashboard-card settings-card" aria-labelledby="voice-alerts-heading">
-          <div className="card-header">
-            <h3 id="voice-alerts-heading" className="card-title">Local Voice Alerts</h3>
+      {/* 6. PERSONALIZATION / BASELINES */}
+      <div className="dashboard-card settings-card">
+        <div className="card-header">
+          <div className="card-title-group">
+            <h2 className="card-title">PERSONALIZATION &amp; CALIBRATION</h2>
+            <span className="card-subtitle">Biomechanical Geometry &amp; Eye Baselines</span>
           </div>
-          <div className="settings-options-list">
-            <div className="setting-item">
-              <div className="setting-info">
-                <span className="setting-label">Enable Voice Alerts</span>
-                <span className="setting-desc">
-                  Speak calm, deterministic guidance when moderate or high risks are detected.
-                </span>
+        </div>
+
+        <div className="settings-card-body">
+          <div className="settings-toggles-grid">
+            <div className="baseline-item-box">
+              <div>
+                <span className="settings-toggle-label">Posture Baseline</span>
+                <p className="card-helper-text">
+                  Status: <strong>{postureCalibrated ? "Calibrated" : "Engineering Default"}</strong>
+                </p>
               </div>
-              <label className="toggle-switch">
-                <input
-                  type="checkbox"
-                  checked={voiceAlertsEnabled}
-                  onChange={(e) => updatePreferences({ voice_alerts_enabled: e.target.checked })}
-                />
-                <span className="slider round" />
-              </label>
-            </div>
-
-            <div className="setting-item-block">
-              <label htmlFor="alert-language-select" className="setting-label">Alert Language</label>
-              <p className="setting-description">
-                Choose the spoken alert language. VisionGuard uses natural studio-quality pre-rendered audio for English and தமிழ்.
-              </p>
-              <select
-                id="alert-language-select"
-                className="form-select"
-                value={alertLanguage}
-                onChange={(e) => setAlertLanguage(e.target.value as "en" | "ta" | "en+ta")}
-                disabled={!voiceAlertsEnabled || quietModeEnabled}
-              >
-                <option value="en">English (Natural Studio Audio)</option>
-                <option value="ta">தமிழ் (இயற்கையான குரல்)</option>
-                <option value="en+ta">English + தமிழ் (Bilingual Sequential)</option>
-              </select>
-            </div>
-
-            <div className="setting-item-block">
-              <span className="setting-label">Spoken Voice Capability</span>
-              <p className="setting-description">
-                {availableVoices.some((v) => v.lang.toLowerCase().startsWith("ta"))
-                  ? "Local Tamil speech synthesizer detected. Natural pre-rendered studio audio is prioritized for crisp alerts."
-                  : "No native Tamil system synthesizer detected. VisionGuard automatically delivers natural pre-rendered Tamil audio assets without English voice fallback."}
-              </p>
-            </div>
-
-            <div className="setting-item-block">
-              <label htmlFor="voice-select" className="setting-label">Synthesizer Voice (Dynamic English)</label>
-              <select
-                id="voice-select"
-                className="form-select"
-                value={selectedVoice || ""}
-                onChange={(e) => updatePreferences({ selected_voice: e.target.value || null })}
-                disabled={!voiceAlertsEnabled || quietModeEnabled}
-              >
-                <option value="">Default System Voice</option>
-                {availableVoices.map((v) => (
-                  <option key={v.name} value={v.name}>
-                    {v.name} ({v.lang})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Volume Slider */}
-            <div className="setting-item-block">
-              <div className="slider-header">
-                <label htmlFor="volume-range" className="setting-label">Voice Volume</label>
-                <span className="slider-value">{Math.round(voiceVolume * 100)}%</span>
-              </div>
-              <input
-                id="volume-range"
-                type="range"
-                min="0.0"
-                max="1.0"
-                step="0.05"
-                value={voiceVolume}
-                onChange={(e) => updatePreferences({ voice_volume: parseFloat(e.target.value) })}
-                disabled={!voiceAlertsEnabled || quietModeEnabled}
-                className="slider-input"
-              />
-            </div>
-
-            {/* Rate Slider */}
-            <div className="setting-item-block">
-              <div className="slider-header">
-                <label htmlFor="rate-range" className="setting-label">Speech Speed (Rate)</label>
-                <span className="slider-value">{voiceRate.toFixed(2)}x</span>
-              </div>
-              <input
-                id="rate-range"
-                type="range"
-                min="0.5"
-                max="2.0"
-                step="0.05"
-                value={voiceRate}
-                onChange={(e) => updatePreferences({ voice_rate: parseFloat(e.target.value) })}
-                disabled={!voiceAlertsEnabled || quietModeEnabled}
-                className="slider-input"
-              />
-            </div>
-
-            {/* Pitch Slider */}
-            <div className="setting-item-block">
-              <div className="slider-header">
-                <label htmlFor="pitch-range" className="setting-label">Voice Pitch</label>
-                <span className="slider-value">{voicePitch.toFixed(2)}</span>
-              </div>
-              <input
-                id="pitch-range"
-                type="range"
-                min="0.5"
-                max="2.0"
-                step="0.05"
-                value={voicePitch}
-                onChange={(e) => updatePreferences({ voice_pitch: parseFloat(e.target.value) })}
-                disabled={!voiceAlertsEnabled || quietModeEnabled}
-                className="slider-input"
-              />
-            </div>
-
-            <div className="setting-actions">
               <button
+                type="button"
                 className="btn btn-secondary btn-sm"
-                onClick={testVoiceAlert}
-                disabled={!voiceAlertsEnabled || quietModeEnabled || isMuted}
+                disabled={!canCalibratePosture || !onOpenPostureCalibration}
+                onClick={onOpenPostureCalibration}
               >
-                Test Voice Alert
+                Personalize Posture Baseline
+              </button>
+            </div>
+
+            <div className="baseline-item-box">
+              <div>
+                <span className="settings-toggle-label">Alertness Baseline</span>
+                <p className="card-helper-text">
+                  Status: <strong>{alertnessCalibrated ? "Calibrated" : "Engineering Default"}</strong>
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={!canCalibrateAlertness || !onOpenAlertnessCalibration}
+                onClick={onOpenAlertnessCalibration}
+              >
+                Personalize Eye Baseline
               </button>
             </div>
           </div>
-        </section>
+        </div>
+      </div>
 
-        {/* Desktop Notifications Card */}
-        <section className="dashboard-card settings-card" aria-labelledby="desktop-notif-heading">
-          <div className="card-header">
-            <h3 id="desktop-notif-heading" className="card-title">Browser &amp; Desktop Notifications</h3>
+      {/* 7. PRIVACY ARCHITECTURE */}
+      <div className="dashboard-card settings-card privacy-callout-card">
+        <div className="card-header">
+          <div className="card-title-group">
+            <h2 className="card-title">PRIVACY ARCHITECTURE</h2>
+            <span className="card-subtitle">Zero-Image Cloud Transmission Guarantee</span>
           </div>
-          <div className="settings-options-list">
-            <div className="setting-item">
-              <div className="setting-info">
-                <span className="setting-label">Notification Permission</span>
-                <span className="setting-desc">
-                  Current browser status: <strong style={{ textTransform: "capitalize" }}>{browserPermission}</strong>
-                </span>
-              </div>
-              {browserPermission === "granted" ? (
-                <span className="badge badge-success">Allowed</span>
-              ) : browserPermission === "denied" ? (
-                <span className="badge badge-danger">Blocked in Browser</span>
-              ) : (
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={requestBrowserNotifications}
-                >
-                  Enable Desktop Notifications
-                </button>
-              )}
-            </div>
+          <span className="privacy-badge">100% LOCAL PERCEPTION</span>
+        </div>
 
-            {browserPermission === "granted" && (
-              <div className="setting-item">
-                <div className="setting-info">
-                  <span className="setting-label">Send Notifications</span>
-                  <span className="setting-desc">
-                    Display native OS banners for sustained posture or alertness risks (30s cooldown).
-                  </span>
-                </div>
-                <label className="toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={browserNotificationsEnabled}
-                    onChange={(e) =>
-                      updatePreferences({ browser_notifications_enabled: e.target.checked })
-                    }
-                  />
-                  <span className="slider round" />
-                </label>
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* Privacy Card */}
-        <section className="dashboard-card settings-card privacy-callout-card" aria-labelledby="privacy-heading">
-          <div className="card-header">
-            <h3 id="privacy-heading" className="card-title">Privacy &amp; Audio Architecture</h3>
-          </div>
+        <div className="settings-card-body">
           <p className="privacy-callout-text">
-            VisionGuard uses the browser/OS Speech Synthesis interface and does not send alert audio or text to a VisionGuard cloud TTS service.
+            VisionGuard processes video frames exclusively on your local workstation via integrated computer vision.
+            Raw webcam frames and face landmarks are NEVER uploaded, stored on servers, or shared with third parties.
           </p>
           <p className="privacy-callout-text" style={{ marginTop: "8px" }}>
-            VisionGuard never requests microphone permission and never records audio. All computer vision processing remains local on your device.
+            Only aggregated session metrics and ergonomic events are securely synced to MongoDB for personal history and reporting.
           </p>
-        </section>
+        </div>
       </div>
     </div>
   );

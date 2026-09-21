@@ -7,6 +7,16 @@ interface InterventionBannerProps {
   intervention: Intervention | null;
 }
 
+function formatSafeTime(timestamp?: string | number | Date | null): string {
+  if (!timestamp) return "--";
+  try {
+    const d = new Date(timestamp);
+    return isNaN(d.getTime()) ? "--" : d.toLocaleTimeString();
+  } catch {
+    return "--";
+  }
+}
+
 export const InterventionBanner: React.FC<InterventionBannerProps> = ({ intervention }) => {
   const { acknowledgeAlert, isAcknowledged } = useAlerts();
 
@@ -33,7 +43,7 @@ export const InterventionBanner: React.FC<InterventionBannerProps> = ({ interven
       <div className="intervention-active-body">
         <div className="intervention-active-header">
           <span className="intervention-category-tag">{intervention.category} &bull; {intervention.level}</span>
-          <span className="intervention-time">{new Date(intervention.timestamp).toLocaleTimeString()}</span>
+          <span className="intervention-time">{formatSafeTime(intervention.timestamp)}</span>
         </div>
         <h4 className="intervention-title">{intervention.title}</h4>
         <p className="intervention-message">{intervention.message}</p>

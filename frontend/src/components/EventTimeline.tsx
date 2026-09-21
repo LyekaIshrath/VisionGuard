@@ -7,6 +7,16 @@ interface EventTimelineProps {
   onClearHistory: () => void;
 }
 
+function formatSafeTime(timestamp?: string | number | Date | null): string {
+  if (!timestamp) return "--";
+  try {
+    const d = new Date(timestamp);
+    return isNaN(d.getTime()) ? "--" : d.toLocaleTimeString();
+  } catch {
+    return "--";
+  }
+}
+
 export const EventTimeline: React.FC<EventTimelineProps> = ({
   events,
   onClearHistory,
@@ -71,7 +81,7 @@ export const EventTimeline: React.FC<EventTimelineProps> = ({
               <tbody>
                 {visibleEvents.map((ev) => (
                   <tr key={ev.event_id} className={`event-row event-${ev.status.toLowerCase()}`}>
-                    <td className="cell-time">{new Date(ev.timestamp).toLocaleTimeString()}</td>
+                    <td className="cell-time">{formatSafeTime(ev.timestamp)}</td>
                     <td className="cell-category">
                       <span className={`category-tag ${ev.category.toLowerCase()}`}>{ev.category}</span>
                     </td>

@@ -95,6 +95,10 @@ class PostureAnalyzer:
         self._baseline = baseline
         self.reset_temporal_state()
 
+    def reset_state(self) -> None:
+        """Alias for reset_temporal_state."""
+        self.reset_temporal_state()
+
     def reset_temporal_state(self) -> None:
         """Reset temporal smoothing buffers while preserving baseline."""
         self._stable_status = PostureStatus.GOOD if self._baseline is not None else PostureStatus.NOT_CALIBRATED

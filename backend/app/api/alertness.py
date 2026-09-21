@@ -61,3 +61,15 @@ async def reset_calibration(
     """Completely invalidate baseline and reset calibration to IDLE."""
     engine.reset_alertness()
     return {"status": "RESET", "state": "IDLE"}
+
+@router.get("/candidates", summary="Get recent blink candidate events for verification")
+def get_blink_candidates(engine: PerceptionEngine = Depends(get_engine)):
+    analyzer = engine.alertness_analyzer
+    candidates = list(analyzer.candidate_history) if hasattr(analyzer, "candidate_history") else []
+    return {
+        "total_blink_count": analyzer._total_blink_count,
+        "longest_eye_closure": analyzer._longest_eye_closure,
+        "threshold_min": analyzer._config.blink_min_duration_sec,
+        "threshold_max": analyzer._config.blink_max_duration_sec,
+        "candidates": candidates,
+    }

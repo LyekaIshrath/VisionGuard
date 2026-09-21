@@ -1,12 +1,10 @@
 /**
  * VisionGuard Central Authenticated API Client.
  *
- * Implements token injection, 401 detection, and automatic single-retry via session refresh.
- * If token refresh fails, invalid auth state is cleared and an event is emitted so UI can notify the user.
+ * Implements token injection and 401 detection backed by MongoDB session tokens.
+ * If 401 Unauthorized is received, auth state is cleared and an event is emitted.
  * Local vision monitoring (camera, posture, alertness, risk, local audio) is never terminated by cloud auth expiration.
  */
-
-import { supabase } from "./supabase";
 
 export interface ApiFetchOptions extends RequestInit {
   /** If true, requires authentication and skips request if no session */
@@ -15,9 +13,10 @@ export interface ApiFetchOptions extends RequestInit {
 
 type AuthExpiredCallback = () => void;
 const authExpiredListeners: Set<AuthExpiredCallback> = new Set();
+const TOKEN_KEY = "visionguard_token";
 
 /**
- * Register a listener invoked when a 401 token refresh fails, requiring re-authentication.
+ * Register a listener invoked when a 401 occurs requiring re-authentication.
  */
 export function onAuthExpired(callback: AuthExpiredCallback): () => void {
   authExpiredListeners.add(callback);
@@ -37,22 +36,13 @@ export function notifyAuthExpired(): void {
 }
 
 /**
- * Authenticated fetch with automatic token injection and 401 refresh-and-retry (exactly once).
+ * Authenticated fetch with automatic token injection and 401 handling.
  */
 export async function apiFetch(input: string | URL | Request, init?: ApiFetchOptions): Promise<Response> {
   const options: ApiFetchOptions = { ...init };
   const headers = new Headers(options.headers || {});
 
-  let currentToken: string | null = null;
-
-  if (supabase) {
-    try {
-      const { data } = await supabase.auth.getSession();
-      currentToken = data.session?.access_token ?? null;
-    } catch (err) {
-      console.warn("[ApiClient] Failed to get current session:", err);
-    }
-  }
+  const currentToken = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
 
   if (options.requireAuth && !currentToken) {
     throw new Error("Authentication required for this request.");
@@ -64,41 +54,14 @@ export async function apiFetch(input: string | URL | Request, init?: ApiFetchOpt
 
   options.headers = headers;
 
-  // 1. Initial Request
-  let response = await fetch(input, options);
+  const response = await fetch(input, options);
 
-  // 2. If 401 Unauthorized, attempt refresh exactly once
-  if (response.status === 401 && supabase) {
-    console.warn("[ApiClient] 401 Unauthorized received. Attempting session refresh...");
-    try {
-      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-
-      if (!refreshError && refreshData.session?.access_token) {
-        const newToken = refreshData.session.access_token;
-        console.info("[ApiClient] Session refreshed successfully. Retrying original request ONCE...");
-
-        // Clone headers and inject refreshed access token
-        const retryHeaders = new Headers(options.headers);
-        retryHeaders.set("Authorization", `Bearer ${newToken}`);
-
-        const retryOptions: ApiFetchOptions = {
-          ...options,
-          headers: retryHeaders,
-        };
-
-        // Retry original request exactly ONCE
-        response = await fetch(input, retryOptions);
-      } else {
-        console.warn("[ApiClient] Session refresh failed. Clearing invalid auth state.");
-        // Clear invalid auth state
-        await supabase.auth.signOut().catch(() => {});
-        notifyAuthExpired();
-      }
-    } catch (refreshErr) {
-      console.error("[ApiClient] Exception during session refresh:", refreshErr);
-      await supabase.auth.signOut().catch(() => {});
-      notifyAuthExpired();
+  if (response.status === 401) {
+    console.warn("[ApiClient] 401 Unauthorized received. Clearing stored token.");
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(TOKEN_KEY);
     }
+    notifyAuthExpired();
   }
 
   return response;

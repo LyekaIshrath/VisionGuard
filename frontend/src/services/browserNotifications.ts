@@ -31,7 +31,6 @@ export class BrowserNotificationService {
       icon?: string;
     }
   ): boolean {
-    // Authoritative check: browser permission MUST be granted
     if (!this.isSupported() || Notification.permission !== "granted") {
       return false;
     }
@@ -52,6 +51,27 @@ export class BrowserNotificationService {
       return true;
     } catch (e) {
       console.error("Failed to show browser notification:", e);
+      return false;
+    }
+  }
+
+  showTestNotification(
+    title: string = "VisionGuard Test Alert",
+    body: string = "Desktop notifications are working correctly with real-time privacy."
+  ): boolean {
+    if (!this.isSupported() || Notification.permission !== "granted") {
+      return false;
+    }
+
+    try {
+      new Notification(title, {
+        body,
+        tag: "visionguard-test-notification",
+        icon: "/favicon.ico",
+      });
+      return true;
+    } catch (e) {
+      console.error("Failed to show test browser notification:", e);
       return false;
     }
   }

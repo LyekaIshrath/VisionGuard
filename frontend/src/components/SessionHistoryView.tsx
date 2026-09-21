@@ -88,7 +88,7 @@ export const SessionHistoryView: React.FC<SessionHistoryViewProps> = ({
           </div>
           <h2 className="empty-title">Sign in to View Session History</h2>
           <p className="empty-subtitle">
-            VisionGuard isolates monitoring sessions per user using Supabase Row-Level Security (RLS).
+            VisionGuard strictly isolates monitoring sessions per user using authenticated user ID security.
             Sign in or create an account to view and synchronize your historical sessions.
           </p>
           <button className="btn btn-primary" onClick={onOpenAuth}>

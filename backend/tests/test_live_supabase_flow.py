@@ -1,3 +1,5 @@
+import pytest
+pytestmark = pytest.mark.skip(reason='Supabase removed from VisionGuard runtime in favor of MongoDB')
 import os
 import time
 import asyncio
