@@ -106,7 +106,6 @@ class MongoDBClient:
             # 1. users
             self._db.users.create_indexes([
                 IndexModel([("email", ASCENDING)], unique=True, name="uniq_user_email"),
-                IndexModel([("phone_number", ASCENDING)], unique=True, partialFilterExpression={"phone_verified": True}, name="uniq_verified_phone"),
                 IndexModel([("created_at", DESCENDING)], name="idx_user_created"),
             ])
 
@@ -153,11 +152,6 @@ class MongoDBClient:
             ])
 
             # 8. notification_devices
-            self._db.phone_verifications.create_indexes([
-                IndexModel([("phone_number", ASCENDING), ("created_at", DESCENDING)], name="idx_pv_phone"),
-                IndexModel([("expires_at", ASCENDING)], name="idx_pv_expires"),
-            ])
-
             self._db.notification_devices.create_indexes([
                 IndexModel([("user_id", ASCENDING), ("push_subscription.endpoint", ASCENDING)], unique=True, sparse=True, name="uniq_user_device_endpoint"),
                 IndexModel([("user_id", ASCENDING)], name="idx_user_devices"),
@@ -186,11 +180,10 @@ class UserRepository:
         email: str,
         password_hash: str,
         display_name: Optional[str] = None,
-        phone_number: Optional[str] = None,
-        phone_verified: bool = False,
-        phone_verified_at: Optional[datetime] = None,
+        *args,
+        **kwargs,
     ) -> Dict[str, Any]:
-        """Create a new user with normalized email, password hash, and verified phone."""
+        """Create a new user with normalized email and password hash."""
         db = self._db_client.db
         if db is None:
             raise RuntimeError("Database connection unavailable.")
@@ -199,15 +192,6 @@ class UserRepository:
         existing = db.users.find_one({"email": norm_email})
         if existing:
             raise ValueError(f"User with email '{norm_email}' already exists.")
-
-        norm_phone = None
-        if phone_number:
-            from app.notifications.phone_utils import normalize_phone_number
-            norm_phone = normalize_phone_number(phone_number)
-            if phone_verified:
-                dup = db.users.find_one({"phone_number": norm_phone, "phone_verified": True})
-                if dup:
-                    raise ValueError(f"Phone number '{norm_phone}' is already registered and verified by another user.")
 
         user_id = str(uuid.uuid4())
         name = display_name or norm_email.split("@")[0]
@@ -219,9 +203,6 @@ class UserRepository:
             "email": norm_email,
             "password_hash": password_hash,
             "display_name": name,
-            "phone_number": norm_phone,
-            "phone_verified": bool(phone_verified),
-            "phone_verified_at": phone_verified_at or (now if phone_verified else None),
             "created_at": now,
             "updated_at": now,
             "status": "ACTIVE",
@@ -236,7 +217,7 @@ class UserRepository:
                 "$setOnInsert": {
                     "user_id": user_id,
                     "browser_notifications_enabled": False,
-                    "sms_alerts_enabled": True,
+                    "mobile_push_enabled": False,
                     "voice_alerts_enabled": True,
                     "voice_volume": 0.8,
                     "voice_rate": 1.0,
@@ -251,16 +232,11 @@ class UserRepository:
             upsert=True,
         )
 
-        from app.notifications.phone_utils import mask_phone_number
         return {
             "id": user_id,
             "_id": user_id,
             "email": norm_email,
             "display_name": name,
-            "phone_number": norm_phone,
-            "phone_masked": mask_phone_number(norm_phone) if norm_phone else None,
-            "phone_verified": bool(phone_verified),
-            "phone_verified_at": (phone_verified_at or now).isoformat() if phone_verified else None,
             "created_at": now.isoformat(),
             "status": "ACTIVE",
         }
@@ -285,60 +261,11 @@ class UserRepository:
         doc = db.users.find_one({"_id": str(user_id)}, {"password_hash": 0})
         if doc:
             doc["id"] = str(doc.get("_id", doc.get("id")))
-            if doc.get("phone_number"):
-                from app.notifications.phone_utils import mask_phone_number
-                doc["phone_masked"] = mask_phone_number(doc["phone_number"])
-            else:
-                doc["phone_masked"] = ""
             if isinstance(doc.get("created_at"), datetime):
                 doc["created_at"] = doc["created_at"].isoformat()
             if isinstance(doc.get("updated_at"), datetime):
                 doc["updated_at"] = doc["updated_at"].isoformat()
         return doc
-
-
-    def get_by_phone(self, phone_number: str) -> Optional[Dict[str, Any]]:
-        """Retrieve user by canonical E.164 phone number."""
-        db = self._db_client.db
-        if db is None:
-            return None
-        from app.notifications.phone_utils import normalize_phone_number
-        try:
-            norm_phone = normalize_phone_number(phone_number)
-        except ValueError:
-            return None
-        doc = db.users.find_one({"phone_number": norm_phone})
-        if doc:
-            doc["id"] = str(doc.get("_id", doc.get("id")))
-        return doc
-
-
-    def update_phone(self, user_id: str, phone_number: str, verified: bool = True) -> bool:
-        """Update and verify a user's phone number with uniqueness protection."""
-        db = self._db_client.db
-        if db is None:
-            return False
-        from app.notifications.phone_utils import normalize_phone_number
-        norm_phone = normalize_phone_number(phone_number)
-
-        # Check if already verified by another user
-        dup = db.users.find_one({"phone_number": norm_phone, "phone_verified": True, "_id": {"$ne": str(user_id)}})
-        if dup:
-            raise ValueError(f"Phone number '{norm_phone}' is already verified by another user.")
-
-        now = datetime.now(timezone.utc)
-        res = db.users.update_one(
-            {"_id": str(user_id)},
-            {
-                "$set": {
-                    "phone_number": norm_phone,
-                    "phone_verified": bool(verified),
-                    "phone_verified_at": now if verified else None,
-                    "updated_at": now,
-                }
-            },
-        )
-        return res.modified_count > 0 or res.matched_count > 0
 
     def delete_user(self, user_id: str) -> bool:
         """Permanently delete user record."""
@@ -912,7 +839,6 @@ class UserPreferencesRepository:
         defaults = {
             "user_id": uid or "",
             "browser_notifications_enabled": False,
-                    "sms_alerts_enabled": True,
             "voice_alerts_enabled": True,
             "voice_volume": 0.8,
             "voice_rate": 1.0,

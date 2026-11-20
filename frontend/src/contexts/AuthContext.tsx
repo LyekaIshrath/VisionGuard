@@ -5,10 +5,6 @@ export interface User {
   _id?: string;
   email?: string;
   display_name?: string;
-  phone_number?: string;
-  phone_masked?: string;
-  phone_verified?: boolean;
-  phone_verified_at?: string;
   status?: string;
 }
 
@@ -18,14 +14,6 @@ export interface AuthSession {
   user: User;
 }
 
-export interface RegisterStartData {
-  full_name: string;
-  email: string;
-  phone_number: string;
-  password: string;
-  confirm_password?: string;
-}
-
 interface AuthContextType {
   user: User | null;
   session: AuthSession | null;
@@ -33,12 +21,7 @@ interface AuthContextType {
   loading: boolean;
   isConfigured: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
-  signUp: (email: string, password: string) => Promise<{ error: Error | null }>;
-  startRegister: (data: RegisterStartData) => Promise<{ error: Error | null; data?: any }>;
-  verifyRegister: (phoneNumber: string, code: string) => Promise<{ error: Error | null }>;
-  resendRegisterOtp: (phoneNumber: string) => Promise<{ error: Error | null; data?: any }>;
-  startPhoneChange: (newPhone: string) => Promise<{ error: Error | null; data?: any }>;
-  verifyPhoneChange: (newPhone: string, code: string) => Promise<{ error: Error | null; data?: any }>;
+  signUp: (email: string, password: string, displayName?: string) => Promise<{ error: Error | null }>;
   refreshUser: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -53,11 +36,6 @@ const AuthContext = createContext<AuthContextType>({
   isConfigured: true,
   signIn: async () => ({ error: null }),
   signUp: async () => ({ error: null }),
-  startRegister: async () => ({ error: null }),
-  verifyRegister: async () => ({ error: null }),
-  resendRegisterOtp: async () => ({ error: null }),
-  startPhoneChange: async () => ({ error: null }),
-  verifyPhoneChange: async () => ({ error: null }),
   refreshUser: async () => {},
   signOut: async () => {},
 });
@@ -95,9 +73,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           id: userData.id || userData._id,
           email: userData.email,
           display_name: userData.display_name,
-          phone_number: userData.phone_number,
-          phone_masked: userData.phone_masked,
-          phone_verified: userData.phone_verified,
           status: userData.status,
         };
         setUser(authUser);
@@ -127,9 +102,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             id: userData.id || userData._id,
             email: userData.email,
             display_name: userData.display_name,
-            phone_number: userData.phone_number,
-            phone_masked: userData.phone_masked,
-            phone_verified: userData.phone_verified,
             status: userData.status,
           };
           setUser(authUser);
@@ -171,9 +143,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         id: data.user.id || data.user._id,
         email: data.user.email,
         display_name: data.user.display_name,
-        phone_number: data.user.phone_number,
-        phone_masked: data.user.phone_masked,
-        phone_verified: data.user.phone_verified,
         status: data.user.status,
       };
 
@@ -190,163 +159,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  const signUp = useCallback(async (email: string, password: string) => {
-    try {
-      const resp = await fetch("/api/v1/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
+  const signUp = useCallback(
+    async (email: string, password: string, displayName?: string) => {
+      try {
+        const resp = await fetch("/api/v1/auth/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email,
+            password,
+            display_name: displayName || undefined,
+          }),
+        });
 
-      const { ok, data, errorMessage } = await parseJsonResponse(resp);
-      if (!ok || !data) {
-        return { error: new Error(errorMessage || "Registration failed.") };
+        const { ok, data, errorMessage } = await parseJsonResponse(resp);
+        if (!ok || !data) {
+          return { error: new Error(errorMessage || "Registration failed.") };
+        }
+
+        const authToken = data.access_token;
+        localStorage.setItem(TOKEN_KEY, authToken);
+
+        const authUser: User = {
+          id: data.user.id || data.user._id,
+          email: data.user.email,
+          display_name: data.user.display_name,
+          status: data.user.status,
+        };
+
+        setUser(authUser);
+        setSession({
+          access_token: authToken,
+          token_type: data.token_type || "bearer",
+          user: authUser,
+        });
+
+        return { error: null };
+      } catch (err: any) {
+        return { error: new Error(err.message || "Network error during registration.") };
       }
-
-      const authToken = data.access_token;
-      localStorage.setItem(TOKEN_KEY, authToken);
-
-      const authUser: User = {
-        id: data.user.id || data.user._id,
-        email: data.user.email,
-        display_name: data.user.display_name,
-        phone_number: data.user.phone_number,
-        phone_masked: data.user.phone_masked,
-        phone_verified: data.user.phone_verified,
-        status: data.user.status,
-      };
-
-      setUser(authUser);
-      setSession({
-        access_token: authToken,
-        token_type: data.token_type || "bearer",
-        user: authUser,
-      });
-
-      return { error: null };
-    } catch (err: any) {
-      return { error: new Error(err.message || "Network error during registration.") };
-    }
-  }, []);
-
-  const startRegister = useCallback(async (data: RegisterStartData) => {
-    try {
-      const resp = await fetch("/api/v1/auth/register/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      const { ok, data: res, errorMessage } = await parseJsonResponse(resp);
-      if (!ok || !res) {
-        return { error: new Error(errorMessage || "Failed to initiate registration.") };
-      }
-      return { error: null, data: res };
-    } catch (err: any) {
-      return { error: new Error(err.message || "Network error during registration.") };
-    }
-  }, []);
-
-  const verifyRegister = useCallback(async (phoneNumber: string, code: string) => {
-    try {
-      const resp = await fetch("/api/v1/auth/register/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone_number: phoneNumber, code }),
-      });
-      const { ok, data, errorMessage } = await parseJsonResponse(resp);
-      if (!ok || !data) {
-        return { error: new Error(errorMessage || "Verification failed.") };
-      }
-
-      const authToken = data.access_token;
-      localStorage.setItem(TOKEN_KEY, authToken);
-
-      const authUser: User = {
-        id: data.user.id || data.user._id,
-        email: data.user.email,
-        display_name: data.user.display_name,
-        phone_number: data.user.phone_number,
-        phone_masked: data.user.phone_masked,
-        phone_verified: true,
-        status: data.user.status,
-      };
-
-      setUser(authUser);
-      setSession({
-        access_token: authToken,
-        token_type: data.token_type || "bearer",
-        user: authUser,
-      });
-
-      return { error: null };
-    } catch (err: any) {
-      return { error: new Error(err.message || "Network error during verification.") };
-    }
-  }, []);
-
-  const resendRegisterOtp = useCallback(async (phoneNumber: string) => {
-    try {
-      const resp = await fetch("/api/v1/auth/register/resend-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone_number: phoneNumber }),
-      });
-      const { ok, data: res, errorMessage } = await parseJsonResponse(resp);
-      if (!ok || !res) {
-        return { error: new Error(errorMessage || "Failed to resend code.") };
-      }
-      return { error: null, data: res };
-    } catch (err: any) {
-      return { error: new Error(err.message || "Network error.") };
-    }
-  }, []);
-
-  const startPhoneChange = useCallback(async (newPhone: string) => {
-    const storedToken = localStorage.getItem(TOKEN_KEY);
-    if (!storedToken) return { error: new Error("Not authenticated.") };
-
-    try {
-      const resp = await fetch("/api/v1/auth/phone/start-change", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${storedToken}`,
-        },
-        body: JSON.stringify({ new_phone_number: newPhone }),
-      });
-      const { ok, data: res, errorMessage } = await parseJsonResponse(resp);
-      if (!ok || !res) {
-        return { error: new Error(errorMessage || "Failed to start phone change.") };
-      }
-      return { error: null, data: res };
-    } catch (err: any) {
-      return { error: new Error(err.message || "Network error.") };
-    }
-  }, []);
-
-  const verifyPhoneChange = useCallback(async (newPhone: string, code: string) => {
-    const storedToken = localStorage.getItem(TOKEN_KEY);
-    if (!storedToken) return { error: new Error("Not authenticated.") };
-
-    try {
-      const resp = await fetch("/api/v1/auth/phone/verify-change", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${storedToken}`,
-        },
-        body: JSON.stringify({ new_phone_number: newPhone, code }),
-      });
-      const { ok, data: res, errorMessage } = await parseJsonResponse(resp);
-      if (!ok || !res) {
-        return { error: new Error(errorMessage || "Failed to verify phone change.") };
-      }
-      await refreshUser();
-      return { error: null, data: res };
-    } catch (err: any) {
-      return { error: new Error(err.message || "Network error.") };
-    }
-  }, [refreshUser]);
+    },
+    []
+  );
 
   const signOut = useCallback(async () => {
     const storedToken = localStorage.getItem(TOKEN_KEY);
@@ -372,11 +226,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isConfigured: true,
         signIn,
         signUp,
-        startRegister,
-        verifyRegister,
-        resendRegisterOtp,
-        startPhoneChange,
-        verifyPhoneChange,
         refreshUser,
         signOut,
       }}

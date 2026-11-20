@@ -24,7 +24,7 @@ bcrypt==5.0.0
 python-jose==3.5.0
 cryptography==50.0.1
 
-# Notifications, SMS & Web Push
+# Notifications & Web Push
 pywebpush==2.5.0
 py-vapid==1.9.4
 requests==2.32.4

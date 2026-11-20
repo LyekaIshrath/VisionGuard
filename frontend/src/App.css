@@ -3385,7 +3385,7 @@ input:checked + .slider.round:before {
   gap: 16px;
 }
 
-.phone-status-row {
+.account-status-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -3393,7 +3393,7 @@ input:checked + .slider.round:before {
   gap: 16px;
 }
 
-.phone-number-display {
+.account-email-display {
   font-size: 16px;
   font-family: monospace;
   font-weight: 700;
@@ -3406,19 +3406,6 @@ input:checked + .slider.round:before {
   font-size: 12px;
   color: var(--text-muted);
   font-style: italic;
-}
-
-.phone-change-box {
-  margin-top: 12px;
-  padding-top: 14px;
-  border-top: 1px dashed var(--border-subtle);
-}
-
-.phone-form {
-  display: flex;
-  gap: 12px;
-  align-items: flex-end;
-  flex-wrap: wrap;
 }
 
 .settings-toggles-grid {

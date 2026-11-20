@@ -26,12 +26,6 @@ function formatAuthError(rawError: any): string {
   ) {
     return "Incorrect email or password.";
   }
-  if (msg.includes("sms") || msg.includes("phone") || msg.includes("twilio") || msg.includes("OTP")) {
-    if (msg.includes("Invalid verification code") || msg.includes("Incorrect code")) {
-      return "Incorrect verification code. Please check and try again.";
-    }
-    return "Phone verification service unavailable.";
-  }
   if (msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("Network error")) {
     return "Unable to connect to VisionGuard.";
   }
@@ -42,24 +36,19 @@ function formatAuthError(rawError: any): string {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
-  const { signIn, startRegister, verifyRegister, resendRegisterOtp, isConfigured } = useAuth();
+  const { signIn, signUp, isConfigured } = useAuth();
   const [isSignUp, setIsSignUp] = useState<boolean>(false);
-  const [step, setStep] = useState<"FORM" | "OTP">("FORM");
 
   // Form Fields
   const [fullName, setFullName] = useState<string>("");
   const [email, setEmail] = useState<string>("");
-  const [phoneNumber, setPhoneNumber] = useState<string>("");
   const [password, setPassword] = useState<string>("");
   const [confirmPassword, setConfirmPassword] = useState<string>("");
-  const [otpCode, setOtpCode] = useState<string>("");
 
   // States
-  const [maskedPhone, setMaskedPhone] = useState<string>("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<boolean>(false);
-  const [cooldown, setCooldown] = useState<number>(0);
 
   // Close on Escape key
   useEffect(() => {
@@ -73,22 +62,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
 
-  // Cooldown countdown timer
-  useEffect(() => {
-    if (cooldown <= 0) return;
-    const timer = setInterval(() => {
-      setCooldown((prev) => (prev > 0 ? prev - 1 : 0));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [cooldown]);
-
   if (!isOpen) return null;
 
   const handleReset = () => {
     setErrorMsg(null);
     setSuccessMsg(null);
-    setOtpCode("");
-    setStep("FORM");
   };
 
   const handleSignIn = async (e: React.FormEvent) => {
@@ -116,7 +94,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  const handleStartRegister = async (e: React.FormEvent) => {
+  const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -127,10 +105,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     }
     if (!email.trim()) {
       setErrorMsg("Please enter your email.");
-      return;
-    }
-    if (!phoneNumber.trim()) {
-      setErrorMsg("Please enter your mobile number in E.164 format (e.g. +919876543210).");
       return;
     }
     if (password.length < 6) {
@@ -144,70 +118,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
     setSubmitting(true);
     try {
-      const { error, data } = await startRegister({
-        full_name: fullName.trim(),
-        email: email.trim(),
-        phone_number: phoneNumber.trim(),
+      const { error } = await signUp(
+        email.trim(),
         password,
-        confirm_password: confirmPassword,
-      });
+        fullName.trim()
+      );
 
       if (error) {
         setErrorMsg(formatAuthError(error));
       } else {
-        setMaskedPhone(data?.phone_number_masked || phoneNumber);
-        setCooldown(data?.resend_cooldown_seconds || 60);
-        setSuccessMsg("Verification code dispatched to your phone.");
-        setStep("OTP");
-      }
-    } catch (err) {
-      setErrorMsg(formatAuthError(err));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleVerifyOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg(null);
-    setSuccessMsg(null);
-
-    if (!otpCode || otpCode.length < 4) {
-      setErrorMsg("Please enter the verification code.");
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const { error } = await verifyRegister(email.trim(), otpCode.trim());
-      if (error) {
-        setErrorMsg(formatAuthError(error));
-      } else {
-        setSuccessMsg("Account verified successfully! Welcome to VisionGuard.");
+        setSuccessMsg("Account created successfully! Welcome to VisionGuard.");
         setTimeout(() => {
           onClose();
-        }, 1200);
-      }
-    } catch (err) {
-      setErrorMsg(formatAuthError(err));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleResendOtp = async () => {
-    if (cooldown > 0) return;
-    setErrorMsg(null);
-    setSuccessMsg(null);
-
-    setSubmitting(true);
-    try {
-      const { error, data } = await resendRegisterOtp(email.trim());
-      if (error) {
-        setErrorMsg(formatAuthError(error));
-      } else {
-        setCooldown(data?.resend_cooldown_seconds || 60);
-        setSuccessMsg("A fresh verification code has been dispatched.");
+        }, 1000);
       }
     } catch (err) {
       setErrorMsg(formatAuthError(err));
@@ -231,14 +154,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         <div className="auth-modal-header">
           <div className="auth-brand-badge">VisionGuard SaaS</div>
           <h2 className="auth-modal-title">
-            {isSignUp ? (step === "OTP" ? "Verify Your Phone" : "Create VisionGuard Account") : "Welcome Back"}
+            {isSignUp ? "Create VisionGuard Account" : "Welcome Back"}
           </h2>
           <p className="auth-modal-subtitle">
             {isSignUp
-              ? step === "OTP"
-                ? `Enter the 6-digit code sent to ${maskedPhone || "your phone"}`
-                : "Continuous ergonomic and wellness intelligence across your workstations."
-              : "Sign in to access personalized baselines, reports, and remote SMS alerts."}
+              ? "Continuous ergonomic and wellness intelligence across your workstations."
+              : "Sign in to access personalized baselines, reports, and wellness intelligence."}
           </p>
         </div>
 
@@ -305,9 +226,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           </form>
         )}
 
-        {/* 2. SIGN UP: STEP 1 (FORM) */}
-        {isSignUp && step === "FORM" && (
-          <form onSubmit={handleStartRegister} className="auth-form">
+        {/* 2. SIGN UP FORM */}
+        {isSignUp && (
+          <form onSubmit={handleSignUp} className="auth-form">
             <div className="form-group">
               <label className="form-label" htmlFor="reg-name">Full Name</label>
               <input
@@ -337,22 +258,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               />
             </div>
 
-            <div className="form-group">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <label className="form-label" htmlFor="reg-phone">Mobile Number</label>
-                <span style={{ fontSize: "0.75rem", color: "var(--text-muted, #94a3b8)" }}>E.164 with Country Code</span>
-              </div>
-              <input
-                id="reg-phone"
-                type="tel"
-                className="form-input"
-                placeholder="+919876543210"
-                value={phoneNumber}
-                onChange={(e) => setPhoneNumber(e.target.value)}
-                disabled={submitting}
-                required
-              />
-            </div>
 
             <div className="form-row">
               <div className="form-group">
@@ -391,58 +296,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               className="btn btn-primary btn-block auth-submit-btn"
               disabled={submitting || !isConfigured}
             >
-              {submitting ? "Sending Verification Code..." : "Send Verification Code"}
+              {submitting ? "Creating Account..." : "Create Account"}
             </button>
-          </form>
-        )}
-
-        {/* 3. SIGN UP: STEP 2 (OTP VERIFICATION) */}
-        {isSignUp && step === "OTP" && (
-          <form onSubmit={handleVerifyOtp} className="auth-form">
-            <div className="form-group">
-              <label className="form-label" htmlFor="reg-otp">6-Digit Verification Code</label>
-              <input
-                id="reg-otp"
-                type="text"
-                className="form-input"
-                placeholder="123456"
-                value={otpCode}
-                onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                maxLength={6}
-                disabled={submitting}
-                autoFocus
-                required
-                style={{ textAlign: "center", letterSpacing: "0.4em", fontSize: "1.25rem", fontWeight: 700 }}
-              />
-            </div>
-
-            <button
-              type="submit"
-              className="btn btn-primary btn-block auth-submit-btn"
-              disabled={submitting || otpCode.length < 4}
-            >
-              {submitting ? "Verifying..." : "Verify & Activate Account"}
-            </button>
-
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "1rem" }}>
-              <button
-                type="button"
-                className="auth-link-btn"
-                onClick={() => setStep("FORM")}
-                disabled={submitting}
-              >
-                ← Back to Edit
-              </button>
-
-              <button
-                type="button"
-                className="auth-link-btn"
-                onClick={handleResendOtp}
-                disabled={cooldown > 0 || submitting}
-              >
-                {cooldown > 0 ? `Resend Code (${cooldown}s)` : "Resend Code"}
-              </button>
-            </div>
           </form>
         )}
 

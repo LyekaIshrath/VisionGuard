@@ -240,7 +240,6 @@ export interface UserPreferences {
   timezone?: string | null;
   alert_language?: "en" | "ta" | "en+ta";
   mobile_push_enabled?: boolean;
-  sms_alerts_enabled?: boolean;
   notify_posture?: boolean;
   notify_alertness?: boolean;
   notify_extended_away?: boolean;
@@ -360,9 +359,5 @@ export interface User {
   _id?: string;
   email?: string;
   display_name?: string;
-  phone_number?: string;
-  phone_masked?: string;
-  phone_verified?: boolean;
-  phone_verified_at?: string;
   status?: string;
 }

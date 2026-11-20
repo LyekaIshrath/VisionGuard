@@ -1,10 +1,10 @@
-"""VisionGuard Alert Orchestrator with Verified Phone SMS Delivery.
+"""VisionGuard Alert Orchestrator.
 
 Strictly downstream coordination of alert actions across delivery surfaces:
 1. IN-APP ALERT (InterventionBanner)
 2. DESKTOP / WINDOWS BROWSER NOTIFICATION (Native Web Notification API)
-3. SMS ALERTS (Verified phone via SmsNotificationProvider)
-4. VOICE ALERTS (Synthesized voice audio)
+3. VOICE ALERTS (Synthesized voice audio)
+4. MOBILE PUSH NOTIFICATIONS (Web Push)
 
 Enforces anti-spam, independent cooldowns, escalation rules, acknowledgement,
 and granular user event preferences (posture, alertness, extended away, session complete).
@@ -30,7 +30,6 @@ from app.alerts.models import (
     MobilePushPayload,
 )
 from app.alerts.policy import AlertPolicyConfig, DEFAULT_ALERT_POLICY
-from app.alerts.sms_notification_provider import sms_notification_provider
 from app.alerts.mobile_push_provider import mobile_push_provider
 
 logger = logging.getLogger("visionguard.alerts")
@@ -45,11 +44,9 @@ class AlertOrchestrator:
         # Monotonic timestamp of last dispatched alert per channel and category
         self._last_voice_time: Dict[RiskCategory, float] = {}
         self._last_notification_time: Dict[RiskCategory, float] = {}
-        self._last_sms_time: Dict[RiskCategory, float] = {}
         self._last_mobile_push_time: Dict[RiskCategory, float] = {}
 
         # Cooldowns
-        self.sms_cooldown_sec = 120.0
         self.mobile_cooldown_sec = 60.0
 
         # Set of acknowledged intervention IDs
@@ -70,7 +67,6 @@ class AlertOrchestrator:
         voice_alerts_enabled: bool = False,
         browser_notifications_enabled: bool = False,
         mobile_push_enabled: bool = False,
-        sms_alerts_enabled: bool = True,
         quiet_mode_enabled: bool = False,
         notify_posture: bool = True,
         notify_alertness: bool = True,
@@ -79,7 +75,7 @@ class AlertOrchestrator:
         current_mono: Optional[float] = None,
     ) -> List[AlertAction]:
         """Evaluates an incoming Intervention against the policy and user preferences.
-        Returns a list of AlertAction directives for the client and dispatches verified SMS.
+        Returns a list of AlertAction directives for the client.
         """
         if current_mono is None:
             current_mono = time.monotonic()
@@ -87,7 +83,7 @@ class AlertOrchestrator:
         category = intervention.category
         level = intervention.level
 
-        # UNKNOWN or LOW produce NO audible/browser/sms alerts
+        # UNKNOWN or LOW produce NO audible/browser/push alerts
         if level in (RiskLevel.UNKNOWN, RiskLevel.LOW):
             self.handle_resolution(category)
             return []
@@ -121,7 +117,7 @@ class AlertOrchestrator:
                 )
             )
 
-        # In Quiet Mode, suppress VOICE, BROWSER_NOTIFICATION, and SMS
+        # In Quiet Mode, suppress VOICE, BROWSER_NOTIFICATION, and MOBILE_PUSH
         if quiet_mode_enabled:
             return actions
 
@@ -172,37 +168,7 @@ class AlertOrchestrator:
                     )
                     self._last_notification_time[category] = current_mono
 
-        # 4. SMS Channel evaluation (Verified Phone SMS Alerts)
-        if sms_alerts_enabled and (level in (RiskLevel.MODERATE, RiskLevel.HIGH)):
-            last_sms = self._last_sms_time.get(category, 0.0)
-            time_since_sms = current_mono - last_sms
-
-            if is_escalation or (time_since_sms >= self.sms_cooldown_sec):
-                actions.append(
-                    AlertAction(
-                        alert_id=f"alert-sms-{uuid.uuid4().hex[:8]}",
-                        intervention_id=intervention.intervention_id,
-                        category=category,
-                        risk_level=level,
-                        channel=AlertChannel.SMS,
-                        message=msg,
-                        priority=priority,
-                        requires_acknowledgement=requires_ack,
-                    )
-                )
-                self._last_sms_time[category] = current_mono
-
-                if user_id:
-                    sms_notification_provider.send_alert_if_eligible(
-                        user_id=user_id,
-                        event_type=f"{category.value}_RISK_{level.value}",
-                        severity=priority.value,
-                        title=f"{category.value.capitalize()} Alert",
-                        message=msg,
-                        current_mono=current_mono,
-                    )
-
-        # 5. Mobile Push Channel evaluation (Backward compatibility)
+        # 4. Mobile Push Channel evaluation (Backward compatibility)
         if mobile_push_enabled and (level in (RiskLevel.MODERATE, RiskLevel.HIGH)):
             last_push = self._last_mobile_push_time.get(category, 0.0)
             time_since_push = current_mono - last_push
@@ -248,7 +214,6 @@ class AlertOrchestrator:
         self._active_interventions.clear()
         self._last_voice_time.clear()
         self._last_notification_time.clear()
-        self._last_sms_time.clear()
         self._last_mobile_push_time.clear()
         self._last_category_level.clear()
 
@@ -261,24 +226,8 @@ class AlertOrchestrator:
         session_id: Optional[str] = None,
         preferences: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Dispatch lifecycle events (e.g. MONITORING_STOPPED, SESSION_REPORT_READY, PROLONGED_AWAY) via SMS."""
-        prefs = preferences or {}
-        if not prefs.get("sms_alerts_enabled", prefs.get("mobile_push_enabled", True)):
-            return {"delivered": 0, "message": "SMS alerts disabled in user preferences"}
-
-        # Event filter checks
-        if event_type in ("MONITORING_STOPPED", "SESSION_REPORT_READY") and not prefs.get("notify_session_complete", True):
-            return {"delivered": 0, "message": "Session complete notifications disabled"}
-        if event_type == "PROLONGED_AWAY" and not prefs.get("notify_extended_away", True):
-            return {"delivered": 0, "message": "Extended away notifications disabled"}
-
-        return sms_notification_provider.send_alert_if_eligible(
-            user_id=user_id,
-            event_type=event_type,
-            severity="NORMAL",
-            title=title,
-            message=message,
-        )
+        """Dispatch lifecycle events (e.g. MONITORING_STOPPED, SESSION_REPORT_READY, PROLONGED_AWAY)."""
+        return {"delivered": 0, "message": "Lifecycle event processed"}
 
 
 # Global singleton orchestrator

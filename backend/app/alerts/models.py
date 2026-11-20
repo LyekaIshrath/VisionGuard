@@ -29,7 +29,6 @@ class AlertChannel(str, Enum):
     IN_APP = "IN_APP"
     BROWSER_NOTIFICATION = "BROWSER_NOTIFICATION"
     VOICE = "VOICE"
-    SMS = "SMS"
     MOBILE_PUSH = "MOBILE_PUSH"
 
 

@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.auth.dependencies import get_current_user
 from app.auth.models import AuthenticatedUser
 from app.alerts.mobile_push_provider import mobile_push_provider
-from app.db.mongodb import mongo_repository, UserRepository
+from app.db.mongodb import mongo_repository
 
 router = APIRouter(prefix="/api/v1/notifications", tags=["notifications"])
 
@@ -108,75 +108,4 @@ async def test_desktop() -> TestNotificationResponse:
         message="Desktop notification test directive issued.",
     )
 
-_test_sms_cooldown: Dict[str, float] = {}
 
-
-@router.post("/test-sms", summary="Send test SMS alert to verified mobile number")
-async def test_sms(
-    current_user: AuthenticatedUser = Depends(get_current_user),
-) -> TestNotificationResponse:
-    """Send an authentic test SMS alert strictly to the authenticated user's verified phone number.
-
-    Security guarantees:
-    - Never accepts destination phone number from client request body.
-    - Resolves phone number exclusively from authenticated user database record.
-    - Requires phone_verified == True and sms_alerts_enabled == True.
-    - Enforces 60-second rate limiting cooldown.
-    """
-    user_repo = UserRepository()
-    user = user_repo.get_by_id(current_user.id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User account not found.")
-
-    phone = user.get("phone_number")
-    phone_verified = bool(user.get("phone_verified", False))
-
-    if not phone or not phone_verified:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No verified phone number found on account. Please verify your mobile number first.",
-        )
-
-    # Check preferences
-    prefs = mongo_repository.preferences.get_user_preferences(current_user.id)
-    if prefs and not prefs.get("sms_alerts_enabled", True):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="SMS alerts are disabled in your notification settings.",
-        )
-
-    # Rate limiting: 60s cooldown
-    now = time.time()
-    last_sent = _test_sms_cooldown.get(current_user.id, 0.0)
-    if now - last_sent < 60.0:
-        remaining = int(60.0 - (now - last_sent))
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Please wait {remaining} seconds before requesting another test SMS.",
-        )
-
-    from app.notifications.sms_provider import sms_provider
-    from app.notifications.phone_utils import mask_phone_number
-
-    if not sms_provider.is_available():
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Phone verification service is currently unavailable",
-        )
-
-    msg = "VisionGuard Test Alert: Your verified mobile number is connected and receiving real-time safety alerts."
-    try:
-        success = sms_provider.send_alert(phone, msg)
-        if success:
-            _test_sms_cooldown[current_user.id] = now
-            return TestNotificationResponse(
-                status="DELIVERED",
-                surface="SMS",
-                message=f"Test SMS dispatched to {mask_phone_number(phone)}.",
-                delivery_summary={"recipient": mask_phone_number(phone), "phone_verified": True},
-            )
-        raise HTTPException(status_code=500, detail="SMS provider failed to deliver message.")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to send test SMS: {str(e)}")

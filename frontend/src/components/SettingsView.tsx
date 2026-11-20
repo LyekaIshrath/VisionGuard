@@ -4,44 +4,43 @@ import { useAuth } from "../contexts/AuthContext";
 import { apiFetch } from "../services/apiClient";
 
 interface SettingsViewProps {
-  apiBase?: string;
+  apiBase: string;
   onOpenPostureCalibration?: () => void;
   onOpenAlertnessCalibration?: () => void;
-  canCalibratePosture?: boolean;
-  canCalibrateAlertness?: boolean;
-  postureCalibrated?: boolean;
-  alertnessCalibrated?: boolean;
+  canCalibratePosture: boolean;
+  canCalibrateAlertness: boolean;
+  postureCalibrated: boolean;
+  alertnessCalibrated: boolean;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
-  apiBase = "",
+  apiBase,
   onOpenPostureCalibration,
   onOpenAlertnessCalibration,
-  canCalibratePosture = true,
-  canCalibrateAlertness = true,
-  postureCalibrated = false,
-  alertnessCalibrated = false,
+  canCalibratePosture,
+  canCalibrateAlertness,
+  postureCalibrated,
+  alertnessCalibrated,
 }) => {
   const {
-    isMuted,
-    quietModeEnabled,
+    browserPermission,
+    browserNotificationsEnabled,
     voiceAlertsEnabled,
+    isMuted,
+    toggleMute,
+    quietModeEnabled,
+    setQuietMode,
     alertLanguage,
     setAlertLanguage,
-    browserNotificationsEnabled,
-    browserPermission,
-    toggleMute,
-    setQuietMode,
     updatePreferences,
     requestBrowserNotifications,
     testBrowserNotification,
     testVoiceAlert,
   } = useAlerts();
 
-  const { user, startPhoneChange, verifyPhoneChange, refreshUser } = useAuth();
+  const { user } = useAuth();
 
   // Multi-Surface Notification Preferences State
-  const [smsAlertsEnabled, setSmsAlertsEnabled] = useState<boolean>(true);
   const [notifyPosture, setNotifyPosture] = useState<boolean>(true);
   const [notifyAlertness, setNotifyAlertness] = useState<boolean>(true);
   const [notifyExtendedAway, setNotifyExtendedAway] = useState<boolean>(true);
@@ -49,18 +48,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // Testing Feedback States
   const [testDesktopFeedback, setTestDesktopFeedback] = useState<string | null>(null);
-  const [testSmsFeedback, setTestSmsFeedback] = useState<string | null>(null);
   const [testVoiceFeedback, setTestVoiceFeedback] = useState<string | null>(null);
-  const [isSendingTestSms, setIsSendingTestSms] = useState<boolean>(false);
-
-  // Phone Change Modal / Flow State
-  const [isChangingPhone, setIsChangingPhone] = useState<boolean>(false);
-  const [changeStep, setChangeStep] = useState<"INPUT" | "OTP">("INPUT");
-  const [newPhoneNumber, setNewPhoneNumber] = useState<string>("");
-  const [otpCode, setOtpCode] = useState<string>("");
-  const [phoneChangeError, setPhoneChangeError] = useState<string | null>(null);
-  const [phoneChangeSuccess, setPhoneChangeSuccess] = useState<string | null>(null);
-  const [phoneChangeLoading, setPhoneChangeLoading] = useState<boolean>(false);
 
   // Load preferences on mount
   useEffect(() => {
@@ -71,7 +59,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         if (resp.ok) {
           const data = await resp.json();
           if (isMounted) {
-            if (data.sms_alerts_enabled !== undefined) setSmsAlertsEnabled(data.sms_alerts_enabled);
             if (data.notify_posture !== undefined) setNotifyPosture(data.notify_posture);
             if (data.notify_alertness !== undefined) setNotifyAlertness(data.notify_alertness);
             if (data.notify_extended_away !== undefined) setNotifyExtendedAway(data.notify_extended_away);
@@ -87,11 +74,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       isMounted = false;
     };
   }, [apiBase]);
-
-  const handleToggleSms = async (enabled: boolean) => {
-    setSmsAlertsEnabled(enabled);
-    await updatePreferences({ sms_alerts_enabled: enabled });
-  };
 
   const handleToggleEventFilter = async (
     key: "notify_posture" | "notify_alertness" | "notify_extended_away" | "notify_session_complete",
@@ -126,85 +108,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setTimeout(() => setTestDesktopFeedback(null), 4000);
   };
 
-  const handleTestSms = async () => {
-    setTestSmsFeedback(null);
-    setIsSendingTestSms(true);
-    try {
-      const resp = await apiFetch(`${apiBase}/api/v1/notifications/test-sms`, { method: "POST" });
-      const data = await resp.json();
-      if (resp.ok) {
-        setTestSmsFeedback(`SMS dispatched to ${data.delivery_summary?.recipient || "your verified phone"}.`);
-      } else {
-        setTestSmsFeedback(data.detail || "Failed to send test SMS.");
-      }
-    } catch (err: any) {
-      setTestSmsFeedback(err.message || "Network error sending test SMS.");
-    } finally {
-      setIsSendingTestSms(false);
-      setTimeout(() => setTestSmsFeedback(null), 6000);
-    }
-  };
-
   const handleTestVoice = () => {
     setTestVoiceFeedback("Playing voice alert test...");
     testVoiceAlert();
     setTimeout(() => setTestVoiceFeedback(null), 4000);
-  };
-
-  // Phone Change Handlers
-  const handleStartPhoneChange = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPhoneChangeError(null);
-    setPhoneChangeSuccess(null);
-
-    if (!newPhoneNumber.trim()) {
-      setPhoneChangeError("Please enter your new mobile number.");
-      return;
-    }
-
-    setPhoneChangeLoading(true);
-    try {
-      const { error } = await startPhoneChange(newPhoneNumber.trim());
-      if (error) {
-        setPhoneChangeError(error.message);
-      } else {
-        setPhoneChangeSuccess("Verification code sent to new mobile number.");
-        setChangeStep("OTP");
-      }
-    } finally {
-      setPhoneChangeLoading(false);
-    }
-  };
-
-  const handleVerifyPhoneChange = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPhoneChangeError(null);
-    setPhoneChangeSuccess(null);
-
-    if (!otpCode.trim() || otpCode.trim().length < 4) {
-      setPhoneChangeError("Please enter the verification code.");
-      return;
-    }
-
-    setPhoneChangeLoading(true);
-    try {
-      const { error } = await verifyPhoneChange(newPhoneNumber.trim(), otpCode.trim());
-      if (error) {
-        setPhoneChangeError(error.message);
-      } else {
-        setPhoneChangeSuccess("Phone number successfully updated and verified!");
-        await refreshUser();
-        setTimeout(() => {
-          setIsChangingPhone(false);
-          setChangeStep("INPUT");
-          setNewPhoneNumber("");
-          setOtpCode("");
-          setPhoneChangeSuccess(null);
-        }, 1200);
-      }
-    } finally {
-      setPhoneChangeLoading(false);
-    }
   };
 
   return (
@@ -212,29 +119,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       <div className="settings-header">
         <h1 className="settings-title">SETTINGS</h1>
         <p className="settings-subtitle">
-          Configure safety notifications, workstation audio, verified channels, and personalized baselines.
+          Configure safety notifications, workstation audio, personalized baselines, and ergonomics.
         </p>
       </div>
 
-      {/* 1. GENERAL / ACCOUNT / VERIFIED PHONE */}
+      {/* 1. GENERAL / ACCOUNT / PROFILE */}
       <div className="dashboard-card settings-card">
         <div className="card-header">
           <div className="card-title-group">
-            <h2 className="card-title">ACCOUNT &amp; VERIFIED PHONE</h2>
-            <span className="card-subtitle">Identity &amp; Multi-Surface SMS Gateway</span>
+            <h2 className="card-title">ACCOUNT &amp; PROFILE</h2>
+            <span className="card-subtitle">Identity &amp; Cloud Synchronization</span>
           </div>
           {user ? (
-            user.phone_verified ? (
-              <span className="status-badge badge-good">
-                <span className="badge-dot" />
-                <span>PHONE VERIFIED</span>
-              </span>
-            ) : (
-              <span className="status-badge badge-warning">
-                <span className="badge-dot" />
-                <span>UNVERIFIED PHONE</span>
-              </span>
-            )
+            <span className="status-badge badge-good">
+              <span className="badge-dot" />
+              <span>AUTHENTICATED</span>
+            </span>
           ) : (
             <span className="status-badge badge-unknown">
               <span className="badge-dot" />
@@ -244,103 +144,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
 
         <div className="settings-card-body">
-          <div className="phone-status-row">
+          <div className="account-status-row">
             <div>
-              <span className="stat-label">Linked Mobile Number</span>
-              <p className="phone-number-display">
-                {user?.phone_masked || (user?.phone_number ? user.phone_number : "No mobile number linked")}
+              <span className="stat-label">Signed-in Account</span>
+              <p className="account-email-display">
+                {user?.email || "Guest / Local User"}
               </p>
               <p className="card-helper-text">
-                Critical posture, alertness, and session summary alerts are delivered directly to this phone via SMS.
+                {user ? `Display Name: ${user.display_name || "User"} • Status: Active` : "Sign in to securely sync ergonomic history and reports across workstations."}
               </p>
             </div>
-
-            {user ? (
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => {
-                  setIsChangingPhone(!isChangingPhone);
-                  setChangeStep("INPUT");
-                  setPhoneChangeError(null);
-                  setPhoneChangeSuccess(null);
-                }}
-              >
-                {isChangingPhone ? "Cancel" : "Change Phone Number"}
-              </button>
-            ) : (
-              <p className="signin-notice-text">
-                Sign in to link a verified mobile number for remote SMS alerts.
-              </p>
-            )}
           </div>
-
-          {/* Inline Phone Change Form */}
-          {isChangingPhone && (
-            <div className="phone-change-box">
-              {phoneChangeError && (
-                <div className="auth-banner auth-banner-error">
-                  <span>{phoneChangeError}</span>
-                </div>
-              )}
-              {phoneChangeSuccess && (
-                <div className="auth-banner auth-banner-success">
-                  <span>{phoneChangeSuccess}</span>
-                </div>
-              )}
-
-              {changeStep === "INPUT" ? (
-                <form onSubmit={handleStartPhoneChange} className="phone-form">
-                  <div className="form-group" style={{ flex: "1 1 240px" }}>
-                    <label className="form-label">New Mobile Number (E.164 format, e.g. +919876543210)</label>
-                    <input
-                      type="tel"
-                      className="form-input"
-                      placeholder="+919876543210"
-                      value={newPhoneNumber}
-                      onChange={(e) => setNewPhoneNumber(e.target.value)}
-                      disabled={phoneChangeLoading}
-                      required
-                    />
-                  </div>
-                  <button type="submit" className="btn btn-primary btn-sm" disabled={phoneChangeLoading}>
-                    {phoneChangeLoading ? "Sending OTP..." : "Send Verification Code"}
-                  </button>
-                </form>
-              ) : (
-                <form onSubmit={handleVerifyPhoneChange} className="phone-form">
-                  <div className="form-group" style={{ flex: "1 1 200px" }}>
-                    <label className="form-label">Enter 6-Digit OTP Code</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      placeholder="123456"
-                      value={otpCode}
-                      onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                      disabled={phoneChangeLoading}
-                      autoFocus
-                      required
-                    />
-                  </div>
-                  <button type="submit" className="btn btn-primary btn-sm" disabled={phoneChangeLoading || otpCode.length < 4}>
-                    {phoneChangeLoading ? "Verifying..." : "Verify & Save Phone"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => setChangeStep("INPUT")}
-                    disabled={phoneChangeLoading}
-                  >
-                    Back
-                  </button>
-                </form>
-              )}
-            </div>
-          )}
         </div>
       </div>
 
-      {/* 2. NOTIFICATIONS (DELIVERY CHANNELS) */}
+      {/* 2. NOTIFICATIONS (DELIVERY SURFACES) */}
       <div className="dashboard-card settings-card">
         <div className="card-header">
           <div className="card-title-group">
@@ -362,22 +180,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   type="checkbox"
                   checked={browserNotificationsEnabled}
                   onChange={(e) => updatePreferences({ browser_notifications_enabled: e.target.checked })}
-                />
-                <span className="slider round" />
-              </label>
-            </div>
-
-            {/* SMS Alerts Toggle */}
-            <div className="settings-toggle-item">
-              <div className="settings-toggle-info">
-                <span className="settings-toggle-label">SMS Alerts</span>
-                <span className="settings-toggle-desc">Direct text messages to verified mobile phone.</span>
-              </div>
-              <label className="toggle-switch">
-                <input
-                  type="checkbox"
-                  checked={smsAlertsEnabled}
-                  onChange={(e) => handleToggleSms(e.target.checked)}
                 />
                 <span className="slider round" />
               </label>
@@ -497,22 +299,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </button>
               {testDesktopFeedback && (
                 <p className="test-feedback-text info">{testDesktopFeedback}</p>
-              )}
-            </div>
-
-            <div className="test-action-item">
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={handleTestSms}
-                disabled={isSendingTestSms || !user?.phone_verified}
-              >
-                {isSendingTestSms ? "SENDING SMS..." : "TEST SMS"}
-              </button>
-              {testSmsFeedback && (
-                <p className={`test-feedback-text ${testSmsFeedback.includes("dispatched") ? "success" : "danger"}`}>
-                  {testSmsFeedback}
-                </p>
               )}
             </div>
 

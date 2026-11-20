@@ -12,7 +12,6 @@ router = APIRouter(prefix="/user", tags=["user"])
 
 class UserPreferencesUpdate(BaseModel):
     browser_notifications_enabled: Optional[bool] = None
-    sms_alerts_enabled: Optional[bool] = None
     mobile_push_enabled: Optional[bool] = None
     notify_posture: Optional[bool] = None
     notify_alertness: Optional[bool] = None
